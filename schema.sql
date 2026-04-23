@@ -57,3 +57,11 @@ create table if not exists profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);

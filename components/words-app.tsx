@@ -1535,6 +1535,7 @@ import { FormEvent, startTransition, useMemo, useState, useEffect, useRef } from
 import type { Category, Challenge, Word } from "@/lib/types";
 import { urlBase64ToUint8Array } from "@/lib/client-push";
 import { themes, getCSSVariables, type ThemeMode } from "@/lib/themes";
+import { AuthModal } from "./AuthModal";
 
 type HomeData = {
   categories: Category[];
@@ -1663,6 +1664,15 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [editBio, setEditBio] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [authed, setAuthed] = useState(false);
+
+  if (p.name) setAuthed(true);
+
+// JSX-ийн эхэнд
+{!authed && <AuthModal onAuth={(name) => {
+  setProfile(p => ({...p, name}));
+  setAuthed(true);
+}} />}
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("words-theme") as ThemeMode | null;
