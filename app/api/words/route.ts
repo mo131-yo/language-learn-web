@@ -32,6 +32,10 @@ import { queryOne } from "@/lib/db";
 import { wordSchema } from "@/lib/validators";
 import { verifyToken } from "@/lib/auth-helpers";
 
+type UserNameRow = {
+  name: string;
+};
+
 export async function POST(request: Request) {
   const parsed = wordSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -46,7 +50,10 @@ export async function POST(request: Request) {
     try {
       const token = authHeader.slice(7);
       const decoded = verifyToken(token);
-      const user = await queryOne("SELECT name FROM users WHERE id = $1", [decoded.userId]);
+      const user = await queryOne<UserNameRow>(
+        "SELECT name FROM users WHERE id = $1",
+        [decoded.userId],
+      );
       if (user) {
         authorName = user.name;
         userId = decoded.userId;
@@ -57,7 +64,7 @@ export async function POST(request: Request) {
   }
 
   const word = await queryOne(
-    `insert into words (term, meaning, example, category_id, author_name, user_id)
+    `insert into words (term, meaning, example, category_id, author_name, author_id)
      values ($1, $2, $3, $4, $5, $6)
      returning *`,
     [

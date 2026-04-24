@@ -2943,6 +2943,7 @@ import {
   useRef,
   useState,
 } from "react";
+import Image from "next/image";
 import type {
   Category,
   Challenge,
@@ -3641,9 +3642,12 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
     if (avatar) {
       return (
-        <img
+        <Image
           src={avatar}
           alt={name}
+          width={size}
+          height={size}
+          unoptimized
           onClick={editable ? () => avatarInputRef.current?.click() : undefined}
           style={{
             width: size,
@@ -5108,9 +5112,12 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                       >
                         <div className="leader-rank">#{index + 1}</div>
                         {entry.avatar ? (
-                          <img
+                          <Image
                             src={entry.avatar}
                             alt={entry.name}
+                            width={44}
+                            height={44}
+                            unoptimized
                             style={{
                               width: 44,
                               height: 44,
@@ -5870,9 +5877,12 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                       {entry.id === authUser.id ? (
                         <AvatarDisplay size={44} />
                       ) : entry.avatar ? (
-                        <img
+                        <Image
                           src={entry.avatar}
                           alt={entry.name}
+                          width={44}
+                          height={44}
+                          unoptimized
                           style={{
                             width: 44,
                             height: 44,
@@ -6088,9 +6098,12 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           >
             <div className="nav-btn-icon">
               {authUser.avatar ? (
-                <img
+                <Image
                   src={authUser.avatar}
                   alt=""
+                  width={24}
+                  height={24}
+                  unoptimized
                   style={{
                     width: 24,
                     height: 24,
