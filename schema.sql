@@ -28,6 +28,8 @@ create table if not exists challenges (
   host_name text not null,
   invite_code text not null unique,
   remind_message text not null default 'Ugee tseejleerei!',
+  duration_days integer not null default 7,
+  expires_at timestamptz,
   created_at timestamptz not null default now()
 );
 

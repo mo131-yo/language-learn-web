@@ -24,10 +24,24 @@ export type Challenge = {
   category_id: string | null;
   category_name: string | null;
   host_name: string;
+  host_id?: string | null;
   invite_code: string;
   remind_message: string;
+  duration_days: number;
+  expires_at: string | null;
   members: string[];
   created_at: string;
+};
+
+export type LeaderboardUser = {
+  id: string;
+  name: string;
+  email: string | null;
+  avatar: string | null;
+  bio: string;
+  xp: number;
+  words_count: number;
+  mastered_words: number;
 };
 
 export type Profile = {
@@ -44,4 +58,5 @@ export type HomeData = {
   categories: Category[];
   words: Word[];
   challenges: Challenge[];
+  leaderboard: LeaderboardUser[];
 };

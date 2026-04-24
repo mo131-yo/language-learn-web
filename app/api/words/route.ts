@@ -30,7 +30,7 @@
 import { NextResponse } from "next/server";
 import { queryOne } from "@/lib/db";
 import { wordSchema } from "@/lib/validators";
-import jwt from "jsonwebtoken";
+import { verifyToken } from "@/lib/auth-helpers";
 
 export async function POST(request: Request) {
   const parsed = wordSchema.safeParse(await request.json());
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   if (authHeader?.startsWith("Bearer ")) {
     try {
       const token = authHeader.slice(7);
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+      const decoded = verifyToken(token);
       const user = await queryOne("SELECT name FROM users WHERE id = $1", [decoded.userId]);
       if (user) {
         authorName = user.name;

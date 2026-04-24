@@ -21,7 +21,8 @@ export const challengeSchema = z.object({
   title: z.string().trim().min(1).max(120),
   categoryId: z.string().uuid().nullable().optional(),
   hostName: z.string().trim().min(1).max(80),
-  remindMessage: z.string().trim().min(1).max(180).default("Ugee tseejleerei!")
+  remindMessage: z.string().trim().min(1).max(180).default("Ugee tseejleerei!"),
+  durationDays: z.coerce.number().int().min(1).max(365).default(7),
 });
 
 export const joinChallengeSchema = z.object({
