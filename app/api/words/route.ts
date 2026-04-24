@@ -30,7 +30,7 @@
 import { NextResponse } from "next/server";
 import { queryOne } from "@/lib/db";
 import { wordSchema } from "@/lib/validators";
-import { verifyToken } from "@/lib/auth-helpers";
+import { getSessionUser, verifyToken } from "@/lib/auth-helpers";
 
 type UserNameRow = {
   name: string;
@@ -43,10 +43,16 @@ export async function POST(request: Request) {
   }
 
   let authorName = parsed.data.authorName || "Anonymous";
-  let userId = null;
+  let userId: string | null = null;
+
+  const sessionUser = await getSessionUser();
+  if (sessionUser) {
+    authorName = sessionUser.name;
+    userId = sessionUser.userId;
+  }
 
   const authHeader = request.headers.get("authorization");
-  if (authHeader?.startsWith("Bearer ")) {
+  if (!userId && authHeader?.startsWith("Bearer ")) {
     try {
       const token = authHeader.slice(7);
       const decoded = verifyToken(token);

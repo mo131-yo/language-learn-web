@@ -3127,6 +3127,10 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [revealed, setRevealed] = useState(false);
   const [quizAnswer, setQuizAnswer] = useState("");
   const [quizResult, setQuizResult] = useState<"correct" | "wrong" | null>(null);
+  const [quizCorrectCount, setQuizCorrectCount] = useState(0);
+  const [quizCompleted, setQuizCompleted] = useState(false);
+  const [quizWrongWordIds, setQuizWrongWordIds] = useState<string[]>([]);
+  const [quizWordIds, setQuizWordIds] = useState<string[] | null>(null);
 
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
@@ -3138,6 +3142,11 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [recentChallenge, setRecentChallenge] = useState<Challenge | null>(null);
   const [challengeDuration, setChallengeDuration] = useState(7);
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
+  const [addWordCategoryMode, setAddWordCategoryMode] = useState<
+    "existing" | "new"
+  >("existing");
+  const [addWordCategoryId, setAddWordCategoryId] = useState("");
+  const [newWordCategoryName, setNewWordCategoryName] = useState("");
 
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [themePickerOpen, setThemePickerOpen] = useState(false);
@@ -3236,16 +3245,39 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     if (selectedCategory === "all") return words;
     return words.filter((w) => w.category_id === selectedCategory);
   }, [selectedCategory, words]);
+  const quizWords = useMemo(() => {
+    if (!quizWordIds) return words;
+
+    return quizWordIds
+      .map((id) => words.find((word) => word.id === id) ?? null)
+      .filter((word): word is Word => word !== null);
+  }, [quizWordIds, words]);
+  const studyWords = mode === "quiz" ? quizWords : filteredWords;
+  const activeCardIndex =
+    mode === "quiz"
+      ? Math.min(cardIndex, Math.max(studyWords.length - 1, 0))
+      : studyWords.length > 0
+        ? cardIndex % studyWords.length
+        : 0;
 
   const currentWord =
-    filteredWords.length > 0
-      ? filteredWords[cardIndex % filteredWords.length]
+    studyWords.length > 0
+      ? studyWords[activeCardIndex]
       : null;
+  const quizScore =
+    studyWords.length > 0
+      ? Math.round((quizCorrectCount / studyWords.length) * 100)
+      : 0;
 
   const masteredCount = words.filter((w) => w.mastery >= 4).length;
   const learningCount = words.filter((w) => w.mastery > 0 && w.mastery < 4).length;
-  const xpTotal = words.reduce((t, w) => t + w.mastery * 20, 0);
   const topLeaders = leaderboard.slice(0, 5);
+  const currentUserLeaderboardEntry = authUser
+    ? leaderboard.find((entry) => entry.id === authUser.id) ?? null
+    : null;
+  const xpTotal =
+    currentUserLeaderboardEntry?.xp ??
+    words.reduce((t, w) => t + w.mastery * 20, 0);
   const myRank = authUser
     ? leaderboard.findIndex((entry) => entry.id === authUser.id) + 1
     : 0;
@@ -3324,12 +3356,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     const color = PALETTE[Math.floor(Math.random() * PALETTE.length)];
 
     try {
-      const cat = await postJson<Category>("/api/categories", {
-        name: form.get("name"),
-        color,
-      });
-
-      setCategories((prev) => [...prev.filter((c) => c.id !== cat.id), cat]);
+      await createCategoryByName(String(form.get("name") ?? ""), color);
       e.currentTarget.reset();
       setNotice("✓ Анги нэмэгдлээ");
     } catch (err) {
@@ -3346,15 +3373,32 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     const form = new FormData(e.currentTarget);
 
     try {
+      let categoryId: string | null = null;
+
+      if (addWordCategoryMode === "new") {
+        const createdCategory = await createCategoryByName(newWordCategoryName);
+        categoryId = createdCategory.id;
+      } else if (addWordCategoryId) {
+        categoryId = addWordCategoryId;
+      }
+
+      if (!categoryId) {
+        setNotice("Ангиллаа сонгох эсвэл шинээр үүсгэнэ үү");
+        return;
+      }
+
       await postJson<Word>("/api/words", {
         term: form.get("term"),
         meaning: form.get("meaning"),
         example: form.get("example") || "",
-        categoryId: form.get("categoryId") || null,
+        categoryId,
         authorName: authUser?.name || "Anonymous",
       });
 
       e.currentTarget.reset();
+      setAddWordCategoryMode("existing");
+      setAddWordCategoryId(categoryId);
+      setNewWordCategoryName("");
       setNotice("✓ Үг нэмэгдлээ!");
       refreshAfterMutation();
     } catch (err) {
@@ -3362,6 +3406,27 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     } finally {
       setBusy("");
     }
+  }
+
+  async function createCategoryByName(name: string, color?: string) {
+    const trimmedName = name.trim();
+
+    if (!trimmedName) {
+      throw new Error("Ангиллын нэрээ оруулна уу");
+    }
+
+    const cat = await postJson<Category>("/api/categories", {
+      name: trimmedName,
+      color: color ?? PALETTE[Math.floor(Math.random() * PALETTE.length)],
+    });
+
+    setCategories((prev) =>
+      [...prev.filter((c) => c.id !== cat.id), cat].sort((a, b) =>
+        a.name.localeCompare(b.name)
+      )
+    );
+
+    return cat;
   }
 
   async function updateMastery(word: Word, delta: number) {
@@ -3390,19 +3455,48 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     setQuizResult(null);
   }
 
+  function resetQuizSession(wordIds?: string[]) {
+    setCardIndex(0);
+    setQuizAnswer("");
+    setQuizResult(null);
+    setQuizCorrectCount(0);
+    setQuizCompleted(false);
+    setQuizWrongWordIds([]);
+    setQuizWordIds(wordIds ?? null);
+  }
+
   function nextCard() {
+    if (mode === "quiz") {
+      if (cardIndex >= studyWords.length - 1) {
+        setQuizCompleted(true);
+        setQuizAnswer("");
+        setQuizResult(null);
+        return;
+      }
+
+      setCardIndex((i) => i + 1);
+      setQuizAnswer("");
+      setQuizResult(null);
+      setTimeout(() => inputRef.current?.focus(), 100);
+      return;
+    }
+
     resetStudyState();
     setCardIndex((i) =>
-      filteredWords.length ? (i + 1) % filteredWords.length : 0
+      studyWords.length ? (i + 1) % studyWords.length : 0
     );
     setTimeout(() => inputRef.current?.focus(), 100);
   }
 
   function prevCard() {
+    if (mode === "quiz") {
+      return;
+    }
+
     resetStudyState();
     setCardIndex((i) =>
-      filteredWords.length
-        ? (i - 1 + filteredWords.length) % filteredWords.length
+      studyWords.length
+        ? (i - 1 + studyWords.length) % studyWords.length
         : 0
     );
   }
@@ -3420,6 +3514,14 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
     const correct = meaning.includes(answer) || answer.includes(meaning);
     setQuizResult(correct ? "correct" : "wrong");
+    if (correct) {
+      setQuizCorrectCount((count) => count + 1);
+      setQuizWrongWordIds((prev) => prev.filter((id) => id !== currentWord.id));
+    } else {
+      setQuizWrongWordIds((prev) =>
+        prev.includes(currentWord.id) ? prev : [...prev, currentWord.id]
+      );
+    }
     void updateMastery(currentWord, correct ? 1 : -1);
   }
 
@@ -4021,6 +4123,29 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           opacity: 0.9;
           line-height: 1.5;
           margin-bottom: 16px;
+        }
+
+        .hero-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+
+        .quiz-banner {
+          margin: 0 auto 14px;
+          max-width: 680px;
+          width: 100%;
+          padding: 12px 16px;
+          border-radius: 16px;
+          background: var(--accent-soft, #fef3c7);
+          border: 1px solid var(--accent-soft-border, #fcd34d);
+          color: var(--text, #111827);
+          font-size: 13px;
+          font-weight: 800;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
         }
 
         .white-btn,
@@ -4899,6 +5024,10 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             grid-template-columns: repeat(3, minmax(0, 1fr));
           }
 
+          .hero-actions {
+            flex-direction: column;
+          }
+
           .xp-badge,
           .streak-pill {
             font-size: 12px;
@@ -5003,9 +5132,26 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                     ? "Өнөөдрийн үгээ давтаад streak-ээ үргэлжлүүлээрэй."
                     : "Өдөр бүр бага багаар давтвал үг амархан тогтоно."}
                 </div>
-                <button className="white-btn" onClick={() => setView("learn")}>
-                  Суралцах үргэлжлүүлэх →
-                </button>
+                <div className="hero-actions">
+                  <button className="white-btn" onClick={() => setView("learn")}>
+                    Суралцах үргэлжлүүлэх →
+                  </button>
+                  <button
+                    className="white-btn"
+                    onClick={() => {
+                      setMode("quiz");
+                      resetQuizSession();
+                      setView("learn");
+                    }}
+                    style={{
+                      background: "rgba(255,255,255,0.14)",
+                      color: "#ffffff",
+                      border: "1px solid rgba(255,255,255,0.28)",
+                    }}
+                  >
+                    Шалгалт өгөх
+                  </button>
+                </div>
               </div>
 
               <div className="stats-row">
@@ -5168,7 +5314,11 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                   onClick={() => {
                     setSelectedCategory("all");
                     setCardIndex(0);
-                    resetStudyState();
+                    if (mode === "quiz") {
+                      resetQuizSession();
+                    } else {
+                      resetStudyState();
+                    }
                   }}
                 >
                   Бүгд ({words.length})
@@ -5181,7 +5331,11 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                     onClick={() => {
                       setSelectedCategory(c.id);
                       setCardIndex(0);
-                      resetStudyState();
+                      if (mode === "quiz") {
+                        resetQuizSession();
+                      } else {
+                        resetStudyState();
+                      }
                     }}
                   >
                     <span
@@ -5200,7 +5354,11 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                     className={`mode-tab${mode === m ? " active" : ""}`}
                     onClick={() => {
                       setMode(m);
-                      resetStudyState();
+                      if (m === "quiz") {
+                        resetQuizSession();
+                      } else {
+                        resetStudyState();
+                      }
                     }}
                   >
                     {m === "flashcard"
@@ -5212,7 +5370,68 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                 ))}
               </div>
 
-              {currentWord ? (
+              {mode === "quiz" && (
+                <div className="quiz-banner">
+                  <span>
+                    {quizWordIds
+                      ? `Дахин шалгалт ${studyWords.length} буруу үгээр явагдана.`
+                      : `Шалгалт бүх ${studyWords.length} үгээр явагдана.`}
+                  </span>
+                  <span>
+                    {quizCompleted
+                      ? `Дууслаа • ${quizScore}/100`
+                      : `${Math.min(cardIndex + 1, Math.max(studyWords.length, 1))}/${studyWords.length}`}
+                  </span>
+                </div>
+              )}
+
+              {mode === "quiz" && quizCompleted ? (
+                <div className="big-flashcard" style={{ cursor: "default" }}>
+                  <div className="new-word-tag">RESULT</div>
+                  <div className="card-term">{quizScore}/100</div>
+                  <div className="card-meaning">
+                    Та {studyWords.length} үгээс {quizCorrectCount}-ийг зөв хийлээ.
+                  </div>
+                  <div className="card-example">
+                    {quizScore >= 90
+                      ? "Маш сайн байна."
+                      : quizScore >= 70
+                        ? "Сайн байна, жаахан давтаад бүр илүү болно."
+                        : "Дахиад нэг давтаад үзээрэй."}
+                  </div>
+                  <div className="action-btns" style={{ width: "100%", marginTop: 20 }}>
+                    <button
+                      className="primary-btn"
+                      onClick={() => {
+                        resetQuizSession();
+                        setTimeout(() => inputRef.current?.focus(), 100);
+                      }}
+                    >
+                      Дахин шалгалт өгөх
+                    </button>
+                    {quizWrongWordIds.length > 0 && (
+                      <button
+                        className="secondary-btn"
+                        onClick={() => {
+                          resetQuizSession(quizWrongWordIds);
+                          setTimeout(() => inputRef.current?.focus(), 100);
+                        }}
+                      >
+                        Буруу үгсээ дахин шалгах
+                      </button>
+                    )}
+                    <button
+                      className="secondary-btn"
+                      onClick={() => {
+                        setMode("flashcard");
+                        resetStudyState();
+                      }}
+                    >
+                      Давталт руу буцах
+                    </button>
+                  </div>
+                </div>
+              ) : currentWord ? (
                 <>
                   <div
                     className="big-flashcard"
@@ -5282,11 +5501,22 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                         )}
 
                         {quizResult && (
-                          <div className={`result-bar ${quizResult}`}>
-                            {quizResult === "correct"
-                              ? "✓ Зөв! +20 XP"
-                              : `✗ Зөв хариулт: ${currentWord.meaning}`}
-                          </div>
+                          <>
+                            <div className={`result-bar ${quizResult}`}>
+                              {quizResult === "correct"
+                                ? "✓ Зөв! +20 XP"
+                                : `✗ Зөв хариулт: ${currentWord.meaning}`}
+                            </div>
+                            <button
+                              className="primary-btn"
+                              style={{ width: "100%", marginTop: 10 }}
+                              onClick={nextCard}
+                            >
+                              {cardIndex >= studyWords.length - 1
+                                ? "Үр дүн харах"
+                                : "Дараагийн асуулт"}
+                            </button>
+                          </>
                         )}
                       </div>
                     )}
@@ -5310,14 +5540,21 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                   </div>
 
                   <div className="card-nav">
-                    <button className="nav-arrow" onClick={prevCard}>
+                    <button
+                      className="nav-arrow"
+                      onClick={prevCard}
+                      disabled={mode === "quiz"}
+                    >
                       ‹
                     </button>
                     <div className="card-counter">
-                      {(cardIndex % filteredWords.length) + 1} /{" "}
-                      {filteredWords.length}
+                      {activeCardIndex + 1} / {studyWords.length}
                     </div>
-                    <button className="nav-arrow" onClick={nextCard}>
+                    <button
+                      className="nav-arrow"
+                      onClick={nextCard}
+                      disabled={mode === "quiz" && !quizResult}
+                    >
                       ›
                     </button>
                   </div>
@@ -5442,14 +5679,103 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
                 <div className="form-group">
                   <label className="form-label">Ангилал</label>
-                  <select name="categoryId" className="form-input" defaultValue="">
-                    <option value="">Ангилалгүй</option>
+                  <select
+                    name="categoryId"
+                    className="form-input"
+                    value={
+                      addWordCategoryMode === "new"
+                        ? "__create_new__"
+                        : addWordCategoryId
+                    }
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "__create_new__") {
+                        setAddWordCategoryMode("new");
+                        setAddWordCategoryId("");
+                        return;
+                      }
+
+                      setAddWordCategoryMode("existing");
+                      setAddWordCategoryId(value);
+                    }}
+                  >
+                    <option value="">Ангилал сонгох</option>
+                    <option value="__create_new__">+ Шинэ ангилал үүсгэх</option>
                     {categories.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
                       </option>
                     ))}
                   </select>
+                  <div
+                    style={{
+                      marginTop: 10,
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 8,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className={
+                        addWordCategoryMode === "existing"
+                          ? "primary-btn"
+                          : "secondary-btn"
+                      }
+                      style={{ width: "auto", padding: "10px 14px", marginTop: 0 }}
+                      onClick={() => setAddWordCategoryMode("existing")}
+                    >
+                      Байгаа ангилал
+                    </button>
+                    <button
+                      type="button"
+                      className={
+                        addWordCategoryMode === "new"
+                          ? "primary-btn"
+                          : "secondary-btn"
+                      }
+                      style={{ width: "auto", padding: "10px 14px", marginTop: 0 }}
+                      onClick={() => {
+                        setAddWordCategoryMode("new");
+                        setAddWordCategoryId("");
+                      }}
+                    >
+                      Шинэ ангилал
+                    </button>
+                  </div>
+
+                  {addWordCategoryMode === "new" ? (
+                    <div style={{ marginTop: 10 }}>
+                      <input
+                        value={newWordCategoryName}
+                        onChange={(e) => setNewWordCategoryName(e.target.value)}
+                        className="form-input"
+                        placeholder="IELTS, Travel, Business..."
+                        required
+                      />
+                      <div
+                        style={{
+                          marginTop: 8,
+                          fontSize: 12,
+                          color: "var(--text-secondary, #6b7280)",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        Үгээ нэмэх үед энэ нэрээр шинэ ангилал автоматаар үүснэ.
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        marginTop: 8,
+                        fontSize: 12,
+                        color: "var(--text-secondary, #6b7280)",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      Одоо байгаа ангиллаас нэгийг сонгоод үгээ нэмнэ.
+                    </div>
+                  )}
                 </div>
 
                 <button
@@ -5862,6 +6188,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
               <div className="sec-head">
                 <div className="sec-title">Бүх хэрэглэгчид</div>
+                <div className="stat-sub">{leaderboard.length} хэрэглэгч</div>
               </div>
 
               {leaderboard.length > 0 ? (
