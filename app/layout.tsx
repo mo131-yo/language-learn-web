@@ -4,7 +4,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Words Neon",
   description: "Public vocabulary flashcards, quizzes, and friend challenges.",
-  manifest: "/manifest.webmanifest"
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+  },
 };
 
 export const viewport: Viewport = {
@@ -13,7 +17,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="mn">
+    <html lang="mn">  
       <body>{children}</body>
     </html>
   );

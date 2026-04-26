@@ -1,7 +1,9 @@
 // lib/db.ts
-import { Pool } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 
-let pool: Pool | null = null;
+type NeonQueryFn = ReturnType<typeof neon>;
+
+let sqlClient: NeonQueryFn | null = null;
 let schemaPromise: Promise<void> | null = null;
 
 const schemaStatements = [
@@ -239,11 +241,9 @@ export function getPool() {
     throw new Error("DATABASE_URL is missing.");
   }
 
-  pool ??= new Pool({
-    connectionString: process.env.DATABASE_URL,
-  });
+  sqlClient ??= neon(process.env.DATABASE_URL);
 
-  return pool;
+  return sqlClient;
 }
 
 async function ensureSchema() {
@@ -264,7 +264,7 @@ export async function query<T>(text: string, params: unknown[] = []) {
   await ensureSchema();
 
   const result = await getPool().query(text, params);
-  return result.rows as T[];
+  return result as T[];
 }
 
 export async function queryOne<T>(text: string, params: unknown[] = []) {

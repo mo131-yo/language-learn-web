@@ -3,8 +3,8 @@ self.addEventListener("push", (event) => {
   const title = data.title || "Words reminder";
   const options = {
     body: data.body || "Ugee tseejleerei!",
-    icon: "/icon.svg",
-    badge: "/icon.svg",
+    icon: "/favicon.svg",
+    badge: "/favicon.svg",
     data: { url: data.url || "/" }
   };
 

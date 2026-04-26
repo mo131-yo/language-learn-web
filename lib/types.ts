@@ -42,6 +42,7 @@ export type LeaderboardUser = {
   xp: number;
   words_count: number;
   mastered_words: number;
+  last_active_at?: number | null;
 };
 
 export type Profile = {
