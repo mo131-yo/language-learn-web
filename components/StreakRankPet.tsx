@@ -406,7 +406,6 @@ export function StreakRankPetCard({
           </div>
         </div>
       </div>
-<divsa></div>
       {/* ══ GLOBAL STYLES ══════════════════════════════════════════════════════ */}
       <style jsx global>{`
         /* ── Card shell ─────────────────────────────────────────────────────── */
