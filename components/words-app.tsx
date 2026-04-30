@@ -1333,6 +1333,27 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       .finally(() => setAuthChecked(true));
   }, []);
 
+  // ── Realtime words ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    const eventSource = new EventSource("/api/sse");
+
+    eventSource.addEventListener("word-added", (e) => {
+      const newWord = JSON.parse(e.data) as Word;
+      setWords((prev) => {
+        if (prev.some((w) => w.id === newWord.id)) return prev;
+        return [newWord, ...prev];
+      });
+    });
+
+    eventSource.onerror = () => {
+      console.warn("SSE connection lost, reconnecting...");
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, []);
+
   // ── Load social state from localStorage ──────────────────────────────────────
   useEffect(() => {
     if (!authUser) return;
@@ -1907,6 +1928,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     setBusy("word");
     const form = new FormData(e.currentTarget);
     const formElement = e.currentTarget;
+    let optimisticWordId: string | null = null;
     try {
       let categoryId: string | null = null;
       let resolvedCategory: Category | null = null;
@@ -1928,6 +1950,21 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       const example = String(form.get("example") ?? "").trim();
       const authorName =
         String(form.get("authorName") ?? "").trim() || authUser?.name || "Anonymous";
+      const tempId = `temp-${Date.now()}`;
+      const optimisticWord: Word = {
+        id: tempId,
+        term,
+        meaning,
+        example,
+        category_id: categoryId,
+        category_name: resolvedCategory?.name ?? null,
+        category_color: resolvedCategory?.color ?? null,
+        author_name: authorName,
+        mastery: 0,
+        created_at: new Date().toISOString(),
+      };
+      optimisticWordId = tempId;
+      setWords((prev) => [optimisticWord, ...prev]);
       const createdWord = await postJson<Word>("/api/words", {
         term,
         meaning,
@@ -1935,18 +1972,14 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         categoryId,
         authorName,
       });
+      const savedWord = {
+        ...createdWord,
+        category_name: createdWord.category_name ?? resolvedCategory?.name ?? null,
+        category_color: createdWord.category_color ?? resolvedCategory?.color ?? null,
+      };
       setWords((prev) => [
-        {
-          ...createdWord,
-          term,
-          meaning,
-          example,
-          category_id: categoryId,
-          category_name: resolvedCategory?.name ?? null,
-          category_color: resolvedCategory?.color ?? null,
-          author_name: authorName,
-        },
-        ...prev,
+        savedWord,
+        ...prev.filter((word) => word.id !== tempId && word.id !== savedWord.id),
       ]);
       try { formElement.reset(); } catch { /* ignore */ }
       setAddWordCategoryMode("existing");
@@ -1956,6 +1989,9 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       setAddWordCategoryMenuOpen(false);
       setNotice(`✓ "${term}" үг нэмэгдлээ!`);
     } catch (err) {
+      if (optimisticWordId) {
+        setWords((prev) => prev.filter((word) => word.id !== optimisticWordId));
+      }
       setNotice(err instanceof Error ? err.message : "Алдаа гарлаа");
     } finally {
       setBusy("");

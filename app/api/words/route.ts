@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { queryOne } from "@/lib/db";
 import { wordSchema } from "@/lib/validators";
 import { getSessionUser, verifyToken } from "@/lib/auth-helpers";
+import { broadcast } from "@/lib/sse-store";
+import type { Word } from "@/lib/types";
 
 type UserNameRow = {
   name: string;
@@ -40,10 +42,15 @@ export async function POST(request: Request) {
     }
   }
 
-  const word = await queryOne(
-    `insert into words (term, meaning, example, category_id, author_name, author_id)
-     values ($1, $2, $3, $4, $5, $6)
-     returning *`,
+  const word = await queryOne<Word>(
+    `with inserted as (
+       insert into words (term, meaning, example, category_id, author_name, author_id)
+       values ($1, $2, $3, $4, $5, $6)
+       returning *
+     )
+     select inserted.*, c.name as category_name, c.color as category_color
+     from inserted
+     left join categories c on c.id = inserted.category_id`,
     [
       parsed.data.term,
       parsed.data.meaning,
@@ -53,6 +60,10 @@ export async function POST(request: Request) {
       userId,
     ]
   );
+
+  if (word) {
+    broadcast("word-added", word);
+  }
 
   return NextResponse.json(word);
 }
