@@ -325,14 +325,14 @@ export function StreakRankPetCard({
         role={onClick ? "button" : undefined}
         tabIndex={onClick ? 0 : undefined}
       >
-        {/* ── Broken-heart overlay ── */}
+
         {streakLost && <StreakLostOverlay onRecover={onRecover ?? (() => {})} />}
 
-        {/* ── Decorative bubbles ── */}
+
         <div className="rpc-bubble rpc-bubble-tr" />
         <div className="rpc-bubble rpc-bubble-bl" />
 
-        {/* ── Top row ── */}
+
         <div className="rpc-head">
           <div>
             <div className="rpc-label">RANK PET</div>
@@ -343,7 +343,7 @@ export function StreakRankPetCard({
           </div>
         </div>
 
-        {/* ── Skin selector ── */}
+
         <div className="rpc-skin-row" onClick={(e) => e.stopPropagation()}>
           {(["default", "special"] as SkinId[]).map((id) => {
             const s = id === "default" ? current.defaultSkin : current.specialSkin;
@@ -361,20 +361,20 @@ export function StreakRankPetCard({
           })}
         </div>
 
-        {/* ── Pet stage ── */}
+
         <div className="rpc-stage">
           <div className="rpc-halo" style={{ background: `radial-gradient(circle,rgba(255,255,255,.35) 0%,transparent 55%), radial-gradient(circle at 50% 76%,${activeSkin.dot},transparent 72%)` }} />
           <AnimatedPet pet={current} skin={activeSkin} />
         </div>
 
-        {/* ── Rank info ── */}
+
         <div className="rpc-info">
           <div className="rpc-rank-name">{current.title}</div>
           <div className="rpc-rank-stage">{current.stage} · {activeSkin.name} skin</div>
           <div className="rpc-rank-desc">{current.description}</div>
         </div>
 
-        {/* ── Progress ── */}
+
         <div className="rpc-prog-box">
           <div className="rpc-prog-head">
             <span>{next ? `Дараагийн цол: ${next.title}` : "Дээд цол хүрсэн"}</span>
@@ -390,7 +390,7 @@ export function StreakRankPetCard({
           </div>
         </div>
 
-        {/* ── Stats ── */}
+
         <div className="rpc-stats">
           <div className="rpc-stat">
             <span>Streak</span>
@@ -406,7 +406,7 @@ export function StreakRankPetCard({
           </div>
         </div>
       </div>
-      {/* ══ GLOBAL STYLES ══════════════════════════════════════════════════════ */}
+
       <style jsx global>{`
         /* ── Card shell ─────────────────────────────────────────────────────── */
         .rpc-card {

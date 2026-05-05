@@ -20,6 +20,8 @@ import { themes, getCSSVariables, type ThemeMode } from "@/lib/themes";
 import { AuthModal } from "./AuthModal";
 import { StreakRankPetCard } from "./StreakRankPet";
 import { RANK_PETS } from "./StreakRankPet";
+import BookReader from "./book-reader";
+import BookLibrary from "./book-library";
 
 type HomeData = {
   categories: Category[];
@@ -46,7 +48,9 @@ type View =
   | "challenges"
   | "shop"
   | "leaderboard"
-  | "profile";
+  | "profile"
+  | "library"
+  | "reader";
 
 type FriendRequest = {
   id: string;
@@ -65,7 +69,7 @@ type HeartReaction = {
   timestamp: number;
 };
 
-// NEW: Chat message type
+
 type ChatMessage = {
   id: string;
   fromId: string;
@@ -74,7 +78,7 @@ type ChatMessage = {
   timestamp: number;
 };
 
-// NEW: XP event for toast notifications
+
 type XpEvent = {
   id: string;
   type: "gain" | "loss";
@@ -163,7 +167,7 @@ const THEME_PREVIEWS: Partial<
   aurora: { bg: "#f5fffd", card: "#ffffff", primary: "#14b8a6", text: "#112b2b", accent: "#8b5cf6" },
 };
 
-// ─── Avatar color helper ───────────────────────────────────────────────────────
+
 const AVATAR_COLORS = [
   ["#e0f2fe", "#0284c7"],
   ["#dcfce7", "#16a34a"],
@@ -219,7 +223,7 @@ function formatLastActive(lastActiveAt?: number | null): string {
   });
 }
 
-// ─── Theme preview card ────────────────────────────────────────────────────────
+
 function ThemePreviewCard({
   themeKey,
   isActive,
@@ -310,7 +314,7 @@ function getNextTitleLevel(xp: number) {
   return TITLE_LEVELS.find((level) => level.xp > xp) ?? null;
 }
 
-// ─── XP Toast Notifications ───────────────────────────────────────────────────
+
 function XpToastContainer({
   events,
   onDismiss,
@@ -388,7 +392,7 @@ function XpToastContainer({
   );
 }
 
-// ─── Profile Modal ─────────────────────────────────────────────────────────────
+
 function UserProfileModal({
   user,
   myId,
@@ -478,7 +482,7 @@ function UserProfileModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header banner */}
+
         <div
           style={{
             background:
@@ -625,7 +629,7 @@ function UserProfileModal({
           </div>
         </div>
 
-        {/* Body */}
+
         <div
           style={{
             flex: 1,
@@ -696,7 +700,7 @@ function UserProfileModal({
             )}
           </div>
 
-          {/* Bio */}
+
           {user.bio && (
             <div
               style={{
@@ -715,7 +719,7 @@ function UserProfileModal({
             </div>
           )}
 
-          {/* Stats */}
+
           <div
             style={{
               display: "grid",
@@ -774,7 +778,7 @@ function UserProfileModal({
             ))}
           </div>
 
-          {/* Action buttons */}
+
           {!isMe && (
             <div
               style={{
@@ -869,7 +873,7 @@ function UserProfileModal({
             </button>
           )}
 
-          {/* Chat section */}
+
           {!isMe && isFriend && (
             <div
               style={{
@@ -1228,7 +1232,7 @@ function ChatDrawer({
   );
 }
 
-// ─── Main App ─────────────────────────────────────────────────────────────────
+
 export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [categories, setCategories] = useState(initialData.categories);
   const [words, setWords] = useState(initialData.words);
@@ -1309,7 +1313,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const chatReadStorageKey = `words-chat-read:${authUser?.id ?? "guest"}`;
   const lastActiveStorageKey = "words-last-active";
 
-  // ── XP event helper ──────────────────────────────────────────────────────────
+
   function addXpEvent(type: "gain" | "loss", amount: number, reason: string) {
     const id = String(++xpEvIdRef.current);
     setXpEvents((prev) => [...prev, { id, type, amount, reason }]);
@@ -1322,7 +1326,15 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     setXpEvents((prev) => prev.filter((e) => e.id !== id));
   }
 
-  // ── Auth ─────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const viewParam = params.get("view");
+
+  if (viewParam === "library") {
+    setView("library");
+  }
+}, []);
+
   useEffect(() => {
     fetch("/api/auth/me")
       .then((r) => r.json())
@@ -1333,7 +1345,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       .finally(() => setAuthChecked(true));
   }, []);
 
-  // ── Realtime words ───────────────────────────────────────────────────────────
+
   useEffect(() => {
     const eventSource = new EventSource("/api/sse");
 
@@ -1354,7 +1366,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     };
   }, []);
 
-  // ── Load social state from localStorage ──────────────────────────────────────
+
   useEffect(() => {
     if (!authUser) return;
     try {
@@ -1402,7 +1414,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     } catch { /* ignore */ }
   }, []);
 
-  // ── Save social state to localStorage ────────────────────────────────────────
+
   useEffect(() => {
     if (!authUser) return;
     localStorage.setItem(friendRequestsStorageKey, JSON.stringify(friendRequests));
@@ -1432,7 +1444,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     localStorage.setItem(lastActiveStorageKey, JSON.stringify(lastActiveMap));
   }, [lastActiveMap, lastActiveStorageKey]);
 
-  // ── Theme ────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     const savedShopState = localStorage.getItem(userThemeStorageKey);
     if (savedShopState) {
@@ -1477,21 +1489,21 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     localStorage.setItem("words-theme", theme);
   }, [ownedThemes, theme]);
 
-  // ── Notice auto-clear ─────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!notice) return;
     const t = window.setTimeout(() => setNotice(""), 4000);
     return () => window.clearTimeout(t);
   }, [notice]);
 
-  // ── Sync authUser to edit fields ──────────────────────────────────────────────
+
   useEffect(() => {
     if (!authUser) return;
     setEditBio(authUser.bio ?? "");
     setEditAvatar(authUser.avatar ?? null);
   }, [authUser]);
 
-  // ── Sync authUser to leaderboard ─────────────────────────────────────────────
+
   useEffect(() => {
     if (!authUser) return;
     setLeaderboard((prev) =>
@@ -1509,7 +1521,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     );
   }, [authUser]);
 
-  // ── Leaderboard entrance animation ───────────────────────────────────────────
+
   useEffect(() => {
     if (view === "leaderboard") {
       setLeaderboardAnimated(false);
@@ -1550,7 +1562,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     };
   }, [authUser]);
 
-  // ── Close dropdowns on outside click ─────────────────────────────────────────
+
   useEffect(() => {
     if (!durationMenuOpen && !addWordModeMenuOpen && !addWordCategoryMenuOpen) {
       return;
@@ -1641,7 +1653,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     categories.find((category) => category.id === addWordCategoryId) ?? null;
   const themeKeys = Object.keys(themes) as ThemeMode[];
 
-  // Social helpers (original)
+
   const pendingRequestsToMe = friendRequests.filter(
     (r) => r.toId === authUser?.id && r.status === "pending"
   );
@@ -1708,7 +1720,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     setChatReadState((prev) => ({ ...prev, [user.id]: Date.now() }));
   }
 
-  // ── Social actions ────────────────────────────────────────────────────────────
+
   function sendFriendRequest(toEntry: LeaderboardUser) {
     if (!authUser || toEntry.id === authUser.id) return;
     if (hasSentRequest(toEntry.id) || areFriends(toEntry.id)) return;
@@ -1771,7 +1783,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     }
   }
 
-  // NEW: Leaderboard like (separate from heart)
+
   function toggleLeaderboardLike(userId: string, userName: string) {
     if (!authUser || userId === authUser.id) return;
     const was = leaderboardLikes[userId] ?? false;
@@ -1781,7 +1793,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     }
   }
 
-  // NEW: Chat send
+
   function sendChatMessage(toId: string) {
     if (!authUser || !chatInput.trim()) return;
     if (!areFriends(toId)) {
@@ -1800,7 +1812,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     setChatReadState((prev) => ({ ...prev, [toId]: Date.now() }));
   }
 
-  // NEW: Unread chat count for a user
+
   function unreadChatCount(userId: string): number {
     if (!authUser) return 0;
     const msgs = chatMessages[userId] ?? [];
@@ -1808,7 +1820,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     return msgs.filter((m) => m.fromId === userId && m.timestamp > lastReadAt).length;
   }
 
-  // ── Leaderboard avatar ────────────────────────────────────────────────────────
+
   function renderLeaderboardAvatar(entry: LeaderboardUser, size = 44) {
     if (authUser && entry.id === authUser.id) {
       return <AvatarDisplay size={size} />;
@@ -1853,7 +1865,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     );
   }
 
-  // ── Misc helpers ─────────────────────────────────────────────────────────────
+
   function refreshAfterMutation() {
     startTransition(() => window.location.reload());
   }
@@ -2329,7 +2341,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     );
   }
 
-  // ── Loading / Auth states ─────────────────────────────────────────────────────
+
   if (!authChecked) {
     return (
       <div
@@ -2359,7 +2371,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     );
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────────
+
   return (
     <>
       <style>{`
@@ -3973,10 +3985,10 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         }
       `}</style>
 
-      {/* XP Toast Notifications */}
+
       <XpToastContainer events={xpEvents} onDismiss={dismissXpEvent} />
 
-      {/* Profile Modal */}
+
       {profileModalUser && (
         <UserProfileModal
           user={profileModalUser}
@@ -4025,7 +4037,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       />
 
       <div className="app">
-        {/* HEADER */}
+
         <header className="app-header">
           <button type="button" onClick={() => setView("home")} className="app-header-logo">
             <Image
@@ -4072,7 +4084,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           </div>
         </header>
 
-        {/* THEME PICKER */}
+
         {themePickerOpen && (
           <div className="theme-picker-overlay">
             <div className="theme-picker">
@@ -4098,7 +4110,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
         <main className="app-body">
 
-          {/* ══ HOME ══ */}
+
           {view === "home" && (
             <div className="page">
               <div className="hero">
@@ -4130,17 +4142,41 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                   </div>
                 </div>
                 <div className="hero-actions">
-                  <button className="white-btn" onClick={() => setView("learn")}>
-                    Суралцах үргэлжлүүлэх →
-                  </button>
-                  <button
-                    className="white-btn"
-                    onClick={() => { setMode("quiz"); resetQuizSession(); setView("learn"); }}
-                    style={{ background: "rgba(255,255,255,0.14)", color: "#ffffff", border: "1px solid rgba(255,255,255,0.28)" }}
-                  >
-                    Шалгалт өгөх
-                  </button>
-                </div>
+  <button className="white-btn" onClick={() => setView("learn")}>
+    Суралцах үргэлжлүүлэх →
+  </button>
+
+  <button
+    className="white-btn"
+    onClick={() => {
+      setMode("quiz");
+      resetQuizSession();
+      setView("learn");
+    }}
+    style={{
+      background: "rgba(255,255,255,0.14)",
+      color: "#ffffff",
+      border: "1px solid rgba(255,255,255,0.28)",
+    }}
+  >
+    Шалгалт өгөх
+  </button>
+
+  <button
+    className="white-btn"
+    onClick={() => {
+      setView("library");
+      window.history.pushState(null, "", "/?view=library");
+    }}
+    style={{
+      background: "rgba(255,255,255,0.14)",
+      color: "#ffffff",
+      border: "1px solid rgba(255,255,255,0.28)",
+    }}
+  >
+    📚 Номын сан
+  </button>
+</div>
               </div>
 
               <div className="profile-card" style={{ marginTop: 16, textAlign: "left", padding: 18, background: "linear-gradient(135deg, rgba(22,163,74,0.1), rgba(15,23,42,0.04))" }}>
@@ -4242,7 +4278,20 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             </div>
           )}
 
-          {/* ══ LEARN ══ */}
+
+        {view === "library" && (
+          <div style={{ padding: 0 }}>
+            <BookLibrary />
+          </div>
+        )}
+
+        {view === "reader" && (
+          <div style={{ padding: 0 }}>
+            <BookReader />
+          </div>
+        )}
+
+
           {view === "learn" && (
             <div className="flashcard-wrap">
               <div className="cat-chips">
@@ -4419,7 +4468,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             </div>
           )}
 
-          {/* ══ ADD WORD ══ */}
+
           {view === "add-word" && (
             <div className="form-page">
               <div className="form-title">Үг нэмэх</div>
@@ -4542,7 +4591,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             </div>
           )}
 
-          {/* ══ CATEGORIES ══ */}
+
           {view === "categories" && (
             <div className="page">
               <div className="form-title">Ангиллууд</div>
@@ -4564,7 +4613,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             </div>
           )}
 
-          {/* ══ CHALLENGES ══ */}
+
           {view === "challenges" && (
             <div className="form-page">
               <div className="form-title">Сорилт</div>
@@ -4770,13 +4819,13 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             </div>
           )}
 
-          {/* ══ LEADERBOARD ══ */}
+
           {view === "leaderboard" && (
             <div className="page">
               <div className="form-title">Leaderboard</div>
               <div className="form-sub">Нэр дарж профайл харах • чатлах • найз болох • лайк дарах</div>
 
-              {/* Friend requests panel */}
+
               {(pendingRequestsToMe.length > 0 || friendRequestsOpen) && (
                 <div className="friend-panel">
                   <div className="friend-panel-head">
@@ -4814,14 +4863,14 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                 </div>
               )}
 
-              {/* Hearts received */}
+
               {heartsToMe.length > 0 && (
                 <div style={{ marginBottom: 16, padding: "12px 16px", borderRadius: 16, background: "#fef2f2", border: "2px solid #fecaca", fontSize: 13, fontWeight: 800, color: "#991b1b" }}>
                   ❤️ {heartsToMe.length} хүн зүрх илгээсэн байна
                 </div>
               )}
 
-              {/* My rank */}
+
               {myRank > 0 && (
                 <>
                   <div className="sec-head"><div className="sec-title">Таны байр</div></div>
@@ -4854,7 +4903,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
               {leaderboard.length > 0 ? (
                 <>
-                  {/* Podium */}
+
                   {podiumLeaders.length > 0 && (
                     <div className="leaderboard-podium">
                       {[1, 0, 2]
@@ -4885,7 +4934,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
                               {entry.id !== authUser.id && (
                                 <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 8, position: "relative", zIndex: 1 }}>
-                                  {/* Like button on podium */}
+
                                   <button
                                     type="button"
                                     className={`like-btn${leaderboardLikes[entry.id] ? " liked" : ""}`}
@@ -4895,7 +4944,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                                   >
                                     {leaderboardLikes[entry.id] ? "❤️" : "🤍"}
                                   </button>
-                                  {/* Heart button on podium */}
+
                                   <button
                                     type="button"
                                     className={`heart-btn${hasGivenHeart(entry.id) ? " hearted" : ""}${heartAnimatingIds.has(entry.id) ? " animating" : ""}`}
@@ -4914,7 +4963,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                     </div>
                   )}
 
-                  {/* Rest of leaderboard */}
+
                   {leaderboardRest.length > 0 && (
                     <div className="leader-list-card">
                       <div className="leaderboard-stack">
@@ -4942,7 +4991,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
                                 {entry.id !== authUser.id && (
                                   <>
-                                    {/* Chat button */}
+
                                     <button
                                       type="button"
                                       className="chat-btn"
@@ -4955,7 +5004,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                                       )}
                                     </button>
 
-                                    {/* Like button */}
+
                                     <button
                                       type="button"
                                       className={`like-btn${liked ? " liked" : ""}`}
@@ -4965,7 +5014,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                                       {liked ? "❤️" : "🤍"}
                                     </button>
 
-                                    {/* Heart button */}
+
                                     <button
                                       type="button"
                                       className={`heart-btn${hasGivenHeart(entry.id) ? " hearted" : ""}${heartAnimatingIds.has(entry.id) ? " animating" : ""}`}
@@ -4976,7 +5025,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                                       {heartCountFor(entry.id) > 0 && <span className="heart-count">{heartCountFor(entry.id)}</span>}
                                     </button>
 
-                                    {/* Friend button */}
+
                                     <button
                                       type="button"
                                       className={`friend-btn${areFriends(entry.id) ? " friends" : hasSentRequest(entry.id) ? " sent" : ""}`}
@@ -5005,7 +5054,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             </div>
           )}
 
-{/* ══ PROFILE ══ */}
+
 {view === "profile" && (
   <div className="page pro-profile-page">
     <section className="pro-profile-hero">
@@ -5200,28 +5249,40 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
         </main>
 
-        {/* BOTTOM NAV */}
         <nav className="bottom-nav">
           <button className={`nav-btn${view === "home" ? " active" : ""}`} onClick={() => setView("home")}>
             <div className="nav-btn-icon">🏠</div>
             <div className="nav-btn-label">Нүүр</div>
           </button>
+
           <button className={`nav-btn${view === "learn" ? " active" : ""}`} onClick={() => setView("learn")}>
             <div className="nav-btn-icon">📚</div>
             <div className="nav-btn-label">Сурах</div>
           </button>
+
           <button className={`nav-btn${view === "add-word" ? " active" : ""}`} onClick={() => setView("add-word")}>
             <div className="nav-btn-icon">➕</div>
             <div className="nav-btn-label">Нэмэх</div>
           </button>
+
           <button className={`nav-btn${view === "challenges" ? " active" : ""}`} onClick={() => setView("challenges")}>
             <div className="nav-btn-icon">⭐</div>
             <div className="nav-btn-label">Сорилт</div>
           </button>
+
+          <button
+            className={`nav-btn${view === "reader" ? " active" : ""}`}
+            onClick={() => setView("reader")}
+          >
+            <div className="nav-btn-icon">📖</div>
+            <div className="nav-btn-label">Ном</div>
+          </button>
+
           <button className={`nav-btn${view === "leaderboard" ? " active" : ""}`} onClick={() => setView("leaderboard")}>
             <div className="nav-btn-icon">🏆</div>
             <div className="nav-btn-label">Rank</div>
           </button>
+
           <button className={`nav-btn${view === "shop" ? " active" : ""}`} onClick={() => setView("shop")}>
             <div className="nav-btn-icon">🛍️</div>
             <div className="nav-btn-label">Shop</div>
