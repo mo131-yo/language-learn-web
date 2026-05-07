@@ -14,6 +14,7 @@ export type Word = {
   category_name: string | null;
   category_color: string | null;
   author_name: string;
+  author_id?: string | null;
   mastery: number;
   created_at: string;
 };

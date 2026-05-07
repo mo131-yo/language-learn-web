@@ -209,6 +209,22 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS user_word_mastery_word_idx ON user_word_mastery(word_id)`,
 
   // ─────────────────────────────────────────────────────────────
+  // USER APP STATE
+  // Browser дээр үлддэг reader/social/theme/XP-spend state-ийг user-аар DB-д хадгална.
+  // ─────────────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS user_app_state (
+    user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    state_key  TEXT        NOT NULL,
+    state_value JSONB      NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, state_key)
+  )`,
+
+  `ALTER TABLE user_app_state ADD COLUMN IF NOT EXISTS state_value JSONB NOT NULL DEFAULT '{}'::jsonb`,
+  `ALTER TABLE user_app_state ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+  `CREATE INDEX IF NOT EXISTS user_app_state_user_idx ON user_app_state(user_id)`,
+
+  // ─────────────────────────────────────────────────────────────
   // OPTIONAL OLD PROFILES TABLE
   // Хуучин code profileSchema ашиглаж байсан бол эвдрэхгүй байлгахын тулд үлдээв.
   // Гол profile мэдээлэл одоо users table дээр хадгалагдана.

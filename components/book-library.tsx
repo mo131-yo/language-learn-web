@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type Book = {
   id: number;
@@ -11,6 +11,17 @@ type Book = {
   downloadCount: number;
   category: string;
   subjects: string[];
+};
+
+type ImportedBook = {
+  id: string;
+  name: string;
+  text: string;
+  importedAt: number;
+};
+
+type UserStateResponse = {
+  state: Record<string, unknown> | null;
 };
 
 const TOPICS = [
@@ -55,8 +66,19 @@ const QUICK_SEARCHES = [
   "Around the World in Eighty Days",
 ];
 
-export default function BookLibrary() {
+type BookLibraryProps = {
+  onReadBook?: (bookId: number) => boolean;
+  onReadImportedBook?: () => boolean;
+  onImportBook?: () => boolean;
+};
+
+export default function BookLibrary({
+  onReadBook,
+  onReadImportedBook,
+  onImportBook,
+}: BookLibraryProps = {}) {
   const [books, setBooks] = useState<Book[]>([]);
+  const [importedBooks, setImportedBooks] = useState<ImportedBook[]>([]);
   const [search, setSearch] = useState<string>("");
   const [activeSearch, setActiveSearch] = useState<string>("");
   const [topic, setTopic] = useState<string>("fiction");
@@ -66,6 +88,86 @@ export default function BookLibrary() {
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
+  const [importError, setImportError] = useState<string>("");
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  function saveImportedBooks(nextBooks: ImportedBook[]) {
+    localStorage.setItem("imported-books", JSON.stringify(nextBooks));
+
+    fetch("/api/user-state", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ key: "imported-books", value: nextBooks }),
+    }).catch(() => {
+      // Browser storage remains the fallback.
+    });
+  }
+
+  function openImportedBook(book: ImportedBook) {
+    if (onReadImportedBook && !onReadImportedBook()) return;
+
+    localStorage.setItem("selected-imported-book", JSON.stringify(book));
+    localStorage.setItem("last-imported-book", JSON.stringify(book));
+    window.location.href = `/?view=reader&importedBookId=${encodeURIComponent(book.id)}`;
+  }
+
+  function requestImportFile() {
+    if (onImportBook && !onImportBook()) return;
+    setImportError("");
+    importInputRef.current?.click();
+  }
+
+  function handleImportBook(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    const allowedTypes = ["text/plain", "application/octet-stream"];
+    const isTxtFile = file.name.toLowerCase().endsWith(".txt");
+
+    if (!isTxtFile && !allowedTypes.includes(file.type)) {
+      setImportError("Одоогоор зөвхөн .txt ном import хийнэ.");
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const text = String(reader.result || "");
+
+      if (!text.trim()) {
+        setImportError("Файл хоосон байна.");
+        return;
+      }
+
+      const importedBook: ImportedBook = {
+        id: `imported-${Date.now()}`,
+        name: file.name,
+        text,
+        importedAt: Date.now(),
+      };
+
+      setImportedBooks((prev) => {
+        const nextBooks = [
+          importedBook,
+          ...prev.filter((book) => book.name !== importedBook.name),
+        ];
+        saveImportedBooks(nextBooks);
+        return nextBooks;
+      });
+
+      openImportedBook(importedBook);
+    };
+
+    reader.onerror = () => {
+      setImportError("Ном унших үед алдаа гарлаа.");
+    };
+
+    reader.readAsText(file);
+  }
 
   async function loadBooks(options?: {
     query?: string;
@@ -137,6 +239,34 @@ export default function BookLibrary() {
     });
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("imported-books");
+      if (raw) {
+        setImportedBooks(JSON.parse(raw) as ImportedBook[]);
+      }
+    } catch {
+      // ignore
+    }
+
+    fetch("/api/user-state?key=imported-books")
+      .then(async (res) => {
+        if (!res.ok) return null;
+        return (await res.json()) as UserStateResponse;
+      })
+      .then((data) => {
+        const imported = data?.state?.["imported-books"];
+
+        if (Array.isArray(imported)) {
+          setImportedBooks(imported as ImportedBook[]);
+          localStorage.setItem("imported-books", JSON.stringify(imported));
+        }
+      })
+      .catch(() => {
+        // Local imported books still work while logged out/offline.
+      });
   }, []);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -809,6 +939,117 @@ export default function BookLibrary() {
             transform: rotate(360deg);
           }
         }
+
+        .my-books-band {
+          margin-bottom: 34px;
+          padding: 22px;
+          border: 1px solid rgba(255,255,255,0.1);
+          border-radius: 24px;
+          background:
+            linear-gradient(135deg, rgba(240,180,41,0.12), rgba(99,102,241,0.08)),
+            rgba(255,255,255,0.04);
+          box-shadow: 0 18px 60px rgba(0,0,0,0.18);
+        }
+
+        .my-books-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 14px;
+          margin-bottom: 16px;
+          flex-wrap: wrap;
+        }
+
+        .my-books-title {
+          font-family: 'Playfair Display', serif;
+          font-size: clamp(1.45rem, 3vw, 2rem);
+          font-weight: 900;
+          color: #fff9e8;
+          letter-spacing: -0.02em;
+        }
+
+        .my-books-sub {
+          margin-top: 3px;
+          color: rgba(255,255,255,0.62);
+          font-size: 0.92rem;
+        }
+
+        .import-book-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          width: auto;
+          padding: 10px 16px;
+          border: 1px solid rgba(240,180,41,0.36);
+          border-radius: 999px;
+          background: linear-gradient(135deg, #f0b429, #f59e0b);
+          color: #1c1202;
+          font-weight: 900;
+          font-size: 0.9rem;
+          box-shadow: 0 12px 28px rgba(240,180,41,0.2);
+        }
+
+        .my-books-row {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+          gap: 14px;
+        }
+
+        .my-book-card {
+          min-height: 190px;
+          padding: 16px;
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 18px;
+          background:
+            radial-gradient(circle at top right, rgba(240,180,41,0.18), transparent 48%),
+            rgba(11, 18, 32, 0.82);
+          color: #ffffff;
+          text-align: left;
+          box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+          transition: transform 0.16s, border-color 0.16s, box-shadow 0.16s;
+        }
+
+        .my-book-card:hover {
+          transform: translateY(-3px);
+          border-color: rgba(240,180,41,0.45);
+          box-shadow: 0 18px 44px rgba(0,0,0,0.26);
+        }
+
+        .my-book-icon {
+          width: 46px;
+          height: 58px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 18px;
+          border-radius: 12px;
+          background: linear-gradient(135deg, #f0b429, #6366f1);
+          font-size: 1.4rem;
+        }
+
+        .my-book-name {
+          color: #fff9e8;
+          font-weight: 900;
+          line-height: 1.25;
+          font-size: 1rem;
+        }
+
+        .my-book-meta {
+          margin-top: 8px;
+          color: rgba(255,255,255,0.58);
+          font-size: 0.78rem;
+          line-height: 1.5;
+        }
+
+        .my-books-empty {
+          padding: 18px;
+          border: 1px dashed rgba(255,255,255,0.16);
+          border-radius: 18px;
+          color: rgba(255,255,255,0.58);
+          font-size: 0.92rem;
+          line-height: 1.6;
+        }
       `}</style>
 
       <div className="lib-root">
@@ -863,6 +1104,62 @@ export default function BookLibrary() {
         </section>
 
         <div className="lib-body">
+          <section className="my-books-band">
+            <div className="my-books-head">
+              <div>
+                <h2 className="my-books-title">Миний import хийсэн ном</h2>
+                <p className="my-books-sub">
+                  Өөрийн .txt номоо оруулаад үгэн дээр дарж AI тайлбар харна.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="import-book-btn"
+                onClick={requestImportFile}
+              >
+                + Өөрийн ном import
+              </button>
+
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".txt,text/plain"
+                onChange={handleImportBook}
+                hidden
+              />
+            </div>
+
+            {importError && <div className="lib-error">⚠ {importError}</div>}
+
+            {importedBooks.length > 0 ? (
+              <div className="my-books-row">
+                {importedBooks.map((book) => (
+                  <button
+                    key={book.id}
+                    type="button"
+                    className="my-book-card"
+                    onClick={() => openImportedBook(book)}
+                  >
+                    <div className="my-book-icon">📘</div>
+                    <div className="my-book-name">
+                      {book.name.replace(/\.txt$/i, "")}
+                    </div>
+                    <div className="my-book-meta">
+                      Imported · {new Date(book.importedAt).toLocaleDateString()}
+                      <br />
+                      {book.text.split(/\s+/).filter(Boolean).length.toLocaleString()} words
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="my-books-empty">
+                Одоогоор import хийсэн ном алга. .txt номоо import хийгээд эндээсээ сонгож уншина.
+              </div>
+            )}
+          </section>
+
           <div className="lib-filters">
             {TOPICS.map((item) => {
               const active = !activeSearch && topic === item.value;
@@ -958,6 +1255,11 @@ export default function BookLibrary() {
                   key={book.id}
                   href={`/reader/${book.id}`}
                   className="book-card"
+                  onClick={(event) => {
+                    if (onReadBook && !onReadBook(book.id)) {
+                      event.preventDefault();
+                    }
+                  }}
                 >
                   <div className="book-card-cover-wrap">
                     {book.cover ? (

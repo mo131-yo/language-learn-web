@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 
+type GutendexBookDetail = {
+  id: number;
+  title: string;
+  authors?: Array<{ name: string }>;
+  formats: Record<string, string>;
+};
+
 function cleanGutenbergText(text: string) {
   const startMarkers = [
     "*** START OF THE PROJECT GUTENBERG EBOOK",
@@ -67,16 +74,29 @@ function splitIntoChapters(text: string) {
     ];
   }
 
-  const chapters = chapterIndexes.map((startLine, chapterIndex) => {
+  const chapters: Array<{ index: number; title: string; text: string }> = [];
+
+  const openingLines = lines.slice(0, chapterIndexes[0]);
+  const openingText = openingLines.join("\n").trim();
+
+  if (openingText.length > 50) {
+    chapters.push({
+      index: 0,
+      title: "Opening",
+      text: openingText,
+    });
+  }
+
+  chapterIndexes.forEach((startLine, chapterIndex) => {
     const endLine = chapterIndexes[chapterIndex + 1] ?? lines.length;
     const chapterLines = lines.slice(startLine, endLine);
     const title = chapterLines[0]?.trim() || `Chapter ${chapterIndex + 1}`;
 
-    return {
-      index: chapterIndex,
+    chapters.push({
+      index: chapters.length,
       title,
       text: chapterLines.join("\n").trim(),
-    };
+    });
   });
 
   return chapters.filter((chapter) => chapter.text.length > 50);
@@ -99,7 +119,7 @@ export async function GET(
       return NextResponse.json({ error: "Book not found" }, { status: 404 });
     }
 
-    const book = await metaRes.json();
+    const book = (await metaRes.json()) as GutendexBookDetail;
 
     const textUrl =
       book.formats["text/plain; charset=utf-8"] ||
@@ -133,7 +153,7 @@ export async function GET(
     return NextResponse.json({
       id: book.id,
       title: book.title,
-      authors: book.authors?.map((a: any) => a.name).join(", ") || "Unknown",
+      authors: book.authors?.map((author) => author.name).join(", ") || "Unknown",
       cover: book.formats["image/jpeg"] || null,
       text,
       chapters,

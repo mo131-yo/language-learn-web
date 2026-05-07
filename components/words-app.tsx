@@ -3,6 +3,7 @@
 import {
   FormEvent,
   startTransition,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -36,6 +37,10 @@ type AuthUser = {
   email?: string;
   avatar: string | null;
   bio: string;
+};
+
+type UserStateResponse = {
+  state: Record<string, unknown> | null;
 };
 
 type Mode = "flashcard" | "quiz" | "check";
@@ -1265,6 +1270,13 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [newWordCategoryName, setNewWordCategoryName] = useState("");
   const [addWordModeMenuOpen, setAddWordModeMenuOpen] = useState(false);
   const [addWordCategoryMenuOpen, setAddWordCategoryMenuOpen] = useState(false);
+  const [editingWordId, setEditingWordId] = useState<string | null>(null);
+  const [editWordDraft, setEditWordDraft] = useState({
+    term: "",
+    meaning: "",
+    example: "",
+    categoryId: "",
+  });
 
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [themePickerOpen, setThemePickerOpen] = useState(false);
@@ -1273,6 +1285,10 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [authPromptOpen, setAuthPromptOpen] = useState(false);
+  const [pendingBookId, setPendingBookId] = useState<number | null>(null);
+  const [pendingView, setPendingView] = useState<View | null>(null);
+  const [userDbStateLoaded, setUserDbStateLoaded] = useState(false);
 
   const [profileEditMode, setProfileEditMode] = useState(false);
   const [editBio, setEditBio] = useState("");
@@ -1313,6 +1329,35 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const chatReadStorageKey = `words-chat-read:${authUser?.id ?? "guest"}`;
   const lastActiveStorageKey = "words-last-active";
 
+  const saveDbState = useCallback((key: string, value: unknown) => {
+    fetch("/api/user-state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value }),
+    }).catch(() => {
+      // Local storage remains the offline fallback.
+    });
+  }, []);
+
+  function requireAuth() {
+    if (authUser) return true;
+    setAuthPromptOpen(true);
+    return false;
+  }
+
+  function openProtectedView(nextView: View) {
+    if (!authUser) {
+      setPendingView(nextView);
+      setAuthPromptOpen(true);
+      return;
+    }
+    setView(nextView);
+  }
+
+  function openLibraryView() {
+    setView("library");
+    window.history.pushState(null, "", "/?view=library");
+  }
 
   function addXpEvent(type: "gain" | "loss", amount: number, reason: string) {
     const id = String(++xpEvIdRef.current);
@@ -1332,6 +1377,8 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
   if (viewParam === "library") {
     setView("library");
+  } else if (viewParam === "reader") {
+    setView("reader");
   }
 }, []);
 
@@ -1339,11 +1386,130 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     fetch("/api/auth/me")
       .then((r) => r.json())
       .then((data: { user: AuthUser | null }) => {
+        setUserDbStateLoaded(false);
         setAuthUser(data.user ?? null);
       })
       .catch(() => setAuthUser(null))
       .finally(() => setAuthChecked(true));
   }, []);
+
+  useEffect(() => {
+    if (!authUser) {
+      setUserDbStateLoaded(false);
+      return;
+    }
+
+    let active = true;
+
+    fetch("/api/user-state")
+      .then(async (res) => {
+        if (!res.ok) return null;
+        return (await res.json()) as UserStateResponse;
+      })
+      .then((data) => {
+        if (!active) return;
+
+        const state = data?.state;
+
+        if (!state) return;
+
+        if (Array.isArray(state.friends)) {
+          setFriendRequests(state.friends as FriendRequest[]);
+          localStorage.setItem(friendRequestsStorageKey, JSON.stringify(state.friends));
+        }
+
+        if (Array.isArray(state.hearts)) {
+          setHeartReactions(state.hearts as HeartReaction[]);
+          localStorage.setItem(heartsStorageKey, JSON.stringify(state.hearts));
+        }
+
+        if (state.chat && typeof state.chat === "object") {
+          setChatMessages(state.chat as Record<string, ChatMessage[]>);
+          localStorage.setItem(chatStorageKey, JSON.stringify(state.chat));
+        }
+
+        if (state["chat-read"] && typeof state["chat-read"] === "object") {
+          setChatReadState(state["chat-read"] as Record<string, number>);
+          localStorage.setItem(chatReadStorageKey, JSON.stringify(state["chat-read"]));
+        }
+
+        if (state.likes && typeof state.likes === "object") {
+          setLeaderboardLikes(state.likes as Record<string, boolean>);
+          localStorage.setItem(likesStorageKey, JSON.stringify(state.likes));
+        }
+
+        if (state["last-active"] && typeof state["last-active"] === "object") {
+          setLastActiveMap(state["last-active"] as Record<string, number>);
+          localStorage.setItem(lastActiveStorageKey, JSON.stringify(state["last-active"]));
+        }
+
+        if (
+          state["theme-shop"] &&
+          typeof state["theme-shop"] === "object"
+        ) {
+          const shopState = state["theme-shop"] as {
+            ownedThemes?: unknown;
+            spentThemeXp?: unknown;
+          };
+          const nextOwnedThemes = Array.from(
+            new Set([
+              "light",
+              ...(Array.isArray(shopState.ownedThemes)
+                ? shopState.ownedThemes.filter(
+                    (item): item is ThemeMode =>
+                      typeof item === "string" && item in themes
+                  )
+                : []),
+            ])
+          ) as ThemeMode[];
+
+          setOwnedThemes(nextOwnedThemes);
+          setSpentThemeXp(
+            typeof shopState.spentThemeXp === "number"
+              ? Math.max(shopState.spentThemeXp, 0)
+              : 0
+          );
+          localStorage.setItem(
+            userThemeStorageKey,
+            JSON.stringify({
+              ownedThemes: nextOwnedThemes,
+              spentThemeXp:
+                typeof shopState.spentThemeXp === "number"
+                  ? Math.max(shopState.spentThemeXp, 0)
+                  : 0,
+            })
+          );
+        }
+
+        if (typeof state.theme === "string" && state.theme in themes) {
+          setTheme(state.theme as ThemeMode);
+          localStorage.setItem("words-theme", state.theme);
+        }
+
+        if (typeof state.streak === "number") {
+          setStreak(Math.max(0, state.streak));
+        }
+      })
+      .catch(() => {
+        // Browser storage keeps the app usable while offline.
+      })
+      .finally(() => {
+        if (active) setUserDbStateLoaded(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    authUser,
+    chatReadStorageKey,
+    chatStorageKey,
+    friendRequestsStorageKey,
+    heartsStorageKey,
+    lastActiveStorageKey,
+    likesStorageKey,
+    userThemeStorageKey,
+  ]);
 
 
   useEffect(() => {
@@ -1418,31 +1584,42 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   useEffect(() => {
     if (!authUser) return;
     localStorage.setItem(friendRequestsStorageKey, JSON.stringify(friendRequests));
-  }, [friendRequests, friendRequestsStorageKey, authUser]);
+    if (userDbStateLoaded) saveDbState("friends", friendRequests);
+  }, [friendRequests, friendRequestsStorageKey, authUser, userDbStateLoaded, saveDbState]);
 
   useEffect(() => {
     if (!authUser) return;
     localStorage.setItem(heartsStorageKey, JSON.stringify(heartReactions));
-  }, [heartReactions, heartsStorageKey, authUser]);
+    if (userDbStateLoaded) saveDbState("hearts", heartReactions);
+  }, [heartReactions, heartsStorageKey, authUser, userDbStateLoaded, saveDbState]);
 
   useEffect(() => {
     if (!authUser) return;
     localStorage.setItem(chatStorageKey, JSON.stringify(chatMessages));
-  }, [chatMessages, chatStorageKey, authUser]);
+    if (userDbStateLoaded) saveDbState("chat", chatMessages);
+  }, [chatMessages, chatStorageKey, authUser, userDbStateLoaded, saveDbState]);
 
   useEffect(() => {
     if (!authUser) return;
     localStorage.setItem(chatReadStorageKey, JSON.stringify(chatReadState));
-  }, [chatReadState, chatReadStorageKey, authUser]);
+    if (userDbStateLoaded) saveDbState("chat-read", chatReadState);
+  }, [chatReadState, chatReadStorageKey, authUser, userDbStateLoaded, saveDbState]);
 
   useEffect(() => {
     if (!authUser) return;
     localStorage.setItem(likesStorageKey, JSON.stringify(leaderboardLikes));
-  }, [leaderboardLikes, likesStorageKey, authUser]);
+    if (userDbStateLoaded) saveDbState("likes", leaderboardLikes);
+  }, [leaderboardLikes, likesStorageKey, authUser, userDbStateLoaded, saveDbState]);
 
   useEffect(() => {
     localStorage.setItem(lastActiveStorageKey, JSON.stringify(lastActiveMap));
-  }, [lastActiveMap, lastActiveStorageKey]);
+    if (authUser && userDbStateLoaded) saveDbState("last-active", lastActiveMap);
+  }, [lastActiveMap, lastActiveStorageKey, authUser, userDbStateLoaded, saveDbState]);
+
+  useEffect(() => {
+    if (!authUser || !userDbStateLoaded) return;
+    saveDbState("streak", streak);
+  }, [authUser, streak, userDbStateLoaded, saveDbState]);
 
 
   useEffect(() => {
@@ -1479,7 +1656,10 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       userThemeStorageKey,
       JSON.stringify({ ownedThemes, spentThemeXp })
     );
-  }, [ownedThemes, spentThemeXp, userThemeStorageKey]);
+    if (authUser && userDbStateLoaded) {
+      saveDbState("theme-shop", { ownedThemes, spentThemeXp });
+    }
+  }, [ownedThemes, spentThemeXp, userThemeStorageKey, authUser, userDbStateLoaded, saveDbState]);
 
   useEffect(() => {
     if (!ownedThemes.includes(theme)) {
@@ -1487,7 +1667,8 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       return;
     }
     localStorage.setItem("words-theme", theme);
-  }, [ownedThemes, theme]);
+    if (authUser && userDbStateLoaded) saveDbState("theme", theme);
+  }, [ownedThemes, theme, authUser, userDbStateLoaded, saveDbState]);
 
 
   useEffect(() => {
@@ -1870,9 +2051,9 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     startTransition(() => window.location.reload());
   }
 
-  async function postJson<T>(url: string, body: unknown): Promise<T> {
+  async function postJson<T>(url: string, body: unknown, method = "POST"): Promise<T> {
     const res = await fetch(url, {
-      method: "POST",
+      method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
@@ -1972,6 +2153,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         category_name: resolvedCategory?.name ?? null,
         category_color: resolvedCategory?.color ?? null,
         author_name: authorName,
+        author_id: authUser?.id ?? null,
         mastery: 0,
         created_at: new Date().toISOString(),
       };
@@ -2040,6 +2222,70 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         setStreak((s) => s + 1);
         addXpEvent("gain", 20, "Үг цээжилсэн");
       }
+    }
+  }
+
+  function startEditingWord(word: Word) {
+    setEditingWordId(word.id);
+    setEditWordDraft({
+      term: word.term,
+      meaning: word.meaning,
+      example: word.example ?? "",
+      categoryId: word.category_id ?? "",
+    });
+  }
+
+  function cancelEditingWord() {
+    setEditingWordId(null);
+    setEditWordDraft({ term: "", meaning: "", example: "", categoryId: "" });
+  }
+
+  async function saveEditedWord(word: Word) {
+    setBusy(`edit-word-${word.id}`);
+
+    try {
+      const updatedWord = await postJson<Word>(`/api/words/${word.id}`, {
+        term: editWordDraft.term,
+        meaning: editWordDraft.meaning,
+        example: editWordDraft.example,
+        categoryId: editWordDraft.categoryId || null,
+      }, "PATCH");
+
+      setWords((prev) =>
+        prev.map((item) => (item.id === word.id ? updatedWord : item))
+      );
+      cancelEditingWord();
+      setNotice(`✓ "${updatedWord.term}" үг засагдлаа`);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Үг засахад алдаа гарлаа");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function deleteWord(word: Word) {
+    const confirmed = window.confirm(`"${word.term}" үгийг устгах уу?`);
+    if (!confirmed) return;
+
+    setBusy(`delete-word-${word.id}`);
+
+    try {
+      const res = await fetch(`/api/words/${word.id}`, { method: "DELETE" });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Үг устгаж чадсангүй." }));
+        throw new Error(data.error ?? "Үг устгаж чадсангүй.");
+      }
+
+      setWords((prev) => prev.filter((item) => item.id !== word.id));
+      if (editingWordId === word.id) {
+        cancelEditingWord();
+      }
+      setNotice(`✓ "${word.term}" үг устлаа`);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Үг устгахад алдаа гарлаа");
+    } finally {
+      setBusy("");
     }
   }
 
@@ -2362,16 +2608,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     );
   }
 
-  if (!authUser) {
-    return (
-      <>
-        <style>{`:root { ${cssVars} }`}</style>
-        <AuthModal onAuth={(user) => setAuthUser(user)} />
-      </>
-    );
-  }
-
-
   return (
     <>
       <style>{`
@@ -2379,6 +2615,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         :root { ${cssVars} }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: var(--bg, #f5f5f0); color: var(--text, #111827); font-family: 'Nunito', 'Segoe UI', sans-serif; min-height: 100vh; }
+        .auth-overlay { position: fixed; inset: 0; z-index: 9999; overflow-y: auto; background: #f5f5f0; }
         button, input, textarea, select { font-family: inherit; }
 
         @keyframes slideInRight {
@@ -2522,6 +2759,14 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         .word-card-term { font-size: 16px; font-weight: 900; color: var(--text, #111827); margin-bottom: 2px; }
         .word-card-meaning { font-size: 13px; color: var(--text-secondary, var(--muted, #6b7280)); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .word-card-mastery { display: flex; gap: 3px; flex-shrink: 0; }
+        .word-card-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+        .mini-action-btn { width: auto; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--border, #e5e7eb); background: var(--bg-secondary, #fff); color: var(--text, #111827); font-size: 12px; font-weight: 900; box-shadow: none; }
+        .mini-action-btn:hover { border-color: var(--primary, #16a34a); transform: translateY(-1px); }
+        .mini-action-btn.danger { color: #dc2626; border-color: rgba(220,38,38,0.28); }
+        .mini-action-btn.danger:hover { background: #fef2f2; border-color: #ef4444; }
+        .word-edit-panel { margin-top: 10px; padding: 12px; border-radius: 14px; border: 1px solid var(--border, #e5e7eb); background: var(--bg, #f9fafb); display: grid; gap: 8px; }
+        .word-edit-panel textarea { min-height: 86px; }
+        .word-edit-actions { display: flex; gap: 8px; }
         .ms-dot { width: 8px; height: 8px; border-radius: 50%; }
         .cat-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 16px; scrollbar-width: none; }
         .cat-chips::-webkit-scrollbar { display: none; }
@@ -3989,7 +4234,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       <XpToastContainer events={xpEvents} onDismiss={dismissXpEvent} />
 
 
-      {profileModalUser && (
+      {profileModalUser && authUser && (
         <UserProfileModal
           user={profileModalUser}
           lastActiveAt={getUserLastActive(
@@ -4016,25 +4261,46 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         />
       )}
 
-      <ChatDrawer
-        isOpen={chatDrawerOpen}
-        activeUser={activeChatUser}
-        friends={friendUsers}
-        authUser={authUser}
-        chatMessages={chatMessages}
-        chatInputValue={chatInput}
-        unreadCount={unreadChatCount}
-        onClose={() => {
-          setChatDrawerOpen(false);
-          setChatInput("");
-        }}
-        onSelectUser={(user) => {
-          setActiveChatUserId(user.id);
-          setChatReadState((prev) => ({ ...prev, [user.id]: Date.now() }));
-        }}
-        onInputChange={setChatInput}
-        onSendChat={sendChatMessage}
-      />
+      {authUser && (
+        <ChatDrawer
+          isOpen={chatDrawerOpen}
+          activeUser={activeChatUser}
+          friends={friendUsers}
+          authUser={authUser}
+          chatMessages={chatMessages}
+          chatInputValue={chatInput}
+          unreadCount={unreadChatCount}
+          onClose={() => {
+            setChatDrawerOpen(false);
+            setChatInput("");
+          }}
+          onSelectUser={(user) => {
+            setActiveChatUserId(user.id);
+            setChatReadState((prev) => ({ ...prev, [user.id]: Date.now() }));
+          }}
+          onInputChange={setChatInput}
+          onSendChat={sendChatMessage}
+        />
+      )}
+
+      {authPromptOpen && (
+        <div className="auth-overlay">
+          <AuthModal
+            onAuth={(user) => {
+              setAuthUser(user);
+              setAuthPromptOpen(false);
+              if (pendingBookId) {
+                window.location.href = `/reader/${pendingBookId}`;
+                return;
+              }
+              if (pendingView) {
+                setView(pendingView);
+              }
+              setPendingView(null);
+            }}
+          />
+        </div>
+      )}
 
       <div className="app">
 
@@ -4062,7 +4328,11 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             <button
               type="button"
               className="icon-btn"
-              onClick={() => { setView("leaderboard"); setFriendRequestsOpen(true); }}
+              onClick={() => {
+                if (!requireAuth()) return;
+                setView("leaderboard");
+                setFriendRequestsOpen(true);
+              }}
               title="Найзын хүсэлтүүд"
             >
               🔔
@@ -4075,8 +4345,8 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             <button
               type="button"
               className="icon-btn"
-              onClick={() => setView("profile")}
-              title={authUser.name}
+              onClick={() => openProtectedView("profile")}
+              title={authUser?.name ?? "Нэвтрэх"}
               style={{ padding: 0, overflow: "hidden" }}
             >
               <AvatarDisplay size={34} />
@@ -4114,7 +4384,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           {view === "home" && (
             <div className="page">
               <div className="hero">
-                <div className="hero-eyebrow">Сайн уу, {authUser.name}</div>
+                <div className="hero-eyebrow">Сайн уу, {authUser?.name ?? "зочин"}</div>
                 <div className="hero-title">
                   {streak > 0 ? `${streak} өдөр дараалал!` : "Өнөөдөр эхэл!"}
                 </div>
@@ -4142,13 +4412,20 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                   </div>
                 </div>
                 <div className="hero-actions">
-  <button className="white-btn" onClick={() => setView("learn")}>
+  <button className="white-btn" onClick={() => openProtectedView("learn")}>
     Суралцах үргэлжлүүлэх →
   </button>
 
   <button
     className="white-btn"
     onClick={() => {
+      if (!authUser) {
+        setMode("quiz");
+        resetQuizSession();
+        setPendingView("learn");
+        setAuthPromptOpen(true);
+        return;
+      }
       setMode("quiz");
       resetQuizSession();
       setView("learn");
@@ -4164,10 +4441,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
   <button
     className="white-btn"
-    onClick={() => {
-      setView("library");
-      window.history.pushState(null, "", "/?view=library");
-    }}
+    onClick={openLibraryView}
     style={{
       background: "rgba(255,255,255,0.14)",
       color: "#ffffff",
@@ -4185,14 +4459,14 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                     <div className="form-title" style={{ fontSize: 19 }}>Streak Pet</div>
                     <div className="form-sub">{currentRankPet.emoji} {currentRankPet.animalName} · {currentRankPet.title}</div>
                   </div>
-                  <button className="secondary-btn" onClick={() => setView("profile")}>Бүх амьтан харах</button>
+                  <button className="secondary-btn" onClick={() => openProtectedView("profile")}>Бүх амьтан харах</button>
                 </div>
                 <StreakRankPetCard
                   lifetimeXp={xpTotal}
                   spendableXp={availableThemeXp}
                   streak={streak}
                   longestStreak={streak}
-                  onClick={() => setView("learn")}
+                  onClick={() => openProtectedView("learn")}
                 />
               </div>
 
@@ -4220,12 +4494,12 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
               <div className="sec-head">
                 <div className="sec-title">Өнөөдрийн зам</div>
-                <button className="sec-link" onClick={() => setView("learn")}>Номын сан харах ↗</button>
+                <button className="sec-link" onClick={openLibraryView}>Номын сан харах ↗</button>
               </div>
 
               <div className="word-list">
                 {words.slice(0, 5).map((w) => (
-                  <div key={w.id} className="word-card" onClick={() => setView("learn")}>
+                  <div key={w.id} className="word-card" onClick={() => openProtectedView("learn")}>
                     <div className="word-card-icon">📖</div>
                     <div className="word-card-body">
                       <div className="word-card-term">{w.term}</div>
@@ -4242,7 +4516,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                   <div className="empty">
                     <div style={{ fontSize: 42, marginBottom: 12 }}>📚</div>
                     <div>Үг байхгүй байна</div>
-                    <button className="primary-btn" style={{ marginTop: 16 }} onClick={() => setView("add-word")}>+ Үг нэмэх</button>
+                    <button className="primary-btn" style={{ marginTop: 16 }} onClick={() => openProtectedView("add-word")}>+ Үг нэмэх</button>
                   </div>
                 )}
               </div>
@@ -4257,7 +4531,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                     {topLeaders.map((entry, index) => (
                       <div
                         key={entry.id}
-                        className={`leader-row animated${entry.id === authUser.id ? " leader-self" : ""}`}
+                        className={`leader-row animated${entry.id === authUser?.id ? " leader-self" : ""}`}
                         style={{ animationDelay: `${index * 0.07}s`, cursor: "pointer" }}
                         onClick={() => setProfileModalUser(entry)}
                       >
@@ -4281,18 +4555,46 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
         {view === "library" && (
           <div style={{ padding: 0 }}>
-            <BookLibrary />
+            <BookLibrary
+              onReadBook={(bookId) => {
+                if (!authUser) {
+                  setPendingBookId(bookId);
+                  setAuthPromptOpen(true);
+                  return false;
+                }
+
+                return true;
+              }}
+              onReadImportedBook={() => {
+                if (!authUser) {
+                  setPendingView("library");
+                  setAuthPromptOpen(true);
+                  return false;
+                }
+
+                return true;
+              }}
+              onImportBook={() => {
+                if (!authUser) {
+                  setPendingView("library");
+                  setAuthPromptOpen(true);
+                  return false;
+                }
+
+                return true;
+              }}
+            />
           </div>
         )}
 
-        {view === "reader" && (
+        {view === "reader" && authUser && (
           <div style={{ padding: 0 }}>
             <BookReader />
           </div>
         )}
 
 
-          {view === "learn" && (
+          {view === "learn" && authUser && (
             <div className="flashcard-wrap">
               <div className="cat-chips">
                 <button
@@ -4442,20 +4744,121 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                   <hr className="divider" />
                   <div className="sec-head"><div className="sec-title">Бүх үгс</div></div>
                   <div className="word-list">
-                    {filteredWords.map((w) => (
-                      <div key={w.id} className="word-card">
-                        <div className="word-card-icon">📝</div>
-                        <div className="word-card-body">
-                          <div className="word-card-term">{w.term}</div>
-                          <div className="word-card-meaning">{w.meaning}</div>
+                    {filteredWords.map((w) => {
+                      const canEditWord = Boolean(authUser?.id && w.author_id === authUser.id);
+                      const isEditing = editingWordId === w.id;
+
+                      return (
+                        <div key={w.id} className="word-card" style={{ alignItems: "flex-start" }}>
+                          <div className="word-card-icon">📝</div>
+                          <div className="word-card-body">
+                            <div className="word-card-term">{w.term}</div>
+                            <div className="word-card-meaning">{w.meaning}</div>
+                            {w.author_name && (
+                              <div className="stat-sub" style={{ marginTop: 4 }}>
+                                Нэмсэн: {w.author_name}
+                              </div>
+                            )}
+
+                            {isEditing && (
+                              <div className="word-edit-panel">
+                                <input
+                                  className="form-input"
+                                  value={editWordDraft.term}
+                                  onChange={(e) =>
+                                    setEditWordDraft((prev) => ({
+                                      ...prev,
+                                      term: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="Үг"
+                                />
+                                <textarea
+                                  className="form-input"
+                                  value={editWordDraft.meaning}
+                                  onChange={(e) =>
+                                    setEditWordDraft((prev) => ({
+                                      ...prev,
+                                      meaning: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="Утга"
+                                />
+                                <input
+                                  className="form-input"
+                                  value={editWordDraft.example}
+                                  onChange={(e) =>
+                                    setEditWordDraft((prev) => ({
+                                      ...prev,
+                                      example: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="Жишээ өгүүлбэр"
+                                />
+                                <select
+                                  className="form-input"
+                                  value={editWordDraft.categoryId}
+                                  onChange={(e) =>
+                                    setEditWordDraft((prev) => ({
+                                      ...prev,
+                                      categoryId: e.target.value,
+                                    }))
+                                  }
+                                >
+                                  <option value="">Ангилалгүй</option>
+                                  {categories.map((category) => (
+                                    <option key={category.id} value={category.id}>
+                                      {category.name}
+                                    </option>
+                                  ))}
+                                </select>
+                                <div className="word-edit-actions">
+                                  <button
+                                    type="button"
+                                    className="primary-btn"
+                                    disabled={busy === `edit-word-${w.id}`}
+                                    onClick={() => saveEditedWord(w)}
+                                  >
+                                    {busy === `edit-word-${w.id}` ? "Хадгалж байна..." : "Хадгалах"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="secondary-btn"
+                                    onClick={cancelEditingWord}
+                                  >
+                                    Болих
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          <div className="word-card-mastery">
+                            {[1, 2, 3, 4, 5].map((i) => (
+                              <div key={i} className="ms-dot" style={{ background: i <= w.mastery ? masteryColor(w.mastery) : "var(--border, #e5e7eb)" }} />
+                            ))}
+                          </div>
+                          {canEditWord && (
+                            <div className="word-card-actions">
+                              <button
+                                type="button"
+                                className="mini-action-btn"
+                                onClick={() => startEditingWord(w)}
+                              >
+                                Засах
+                              </button>
+                              <button
+                                type="button"
+                                className="mini-action-btn danger"
+                                disabled={busy === `delete-word-${w.id}`}
+                                onClick={() => deleteWord(w)}
+                              >
+                                Устгах
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        <div className="word-card-mastery">
-                          {[1, 2, 3, 4, 5].map((i) => (
-                            <div key={i} className="ms-dot" style={{ background: i <= w.mastery ? masteryColor(w.mastery) : "var(--border, #e5e7eb)" }} />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               ) : (
@@ -4469,7 +4872,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           )}
 
 
-          {view === "add-word" && (
+          {view === "add-word" && authUser && (
             <div className="form-page">
               <div className="form-title">Үг нэмэх</div>
               <div className="form-sub">Нэмсэн үг бүх хэрэглэгчид харагдана</div>
@@ -4592,7 +4995,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           )}
 
 
-          {view === "categories" && (
+          {view === "categories" && authUser && (
             <div className="page">
               <div className="form-title">Ангиллууд</div>
               <div className="form-sub">Үгсээ ангиллаар нь давт</div>
@@ -4614,7 +5017,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           )}
 
 
-          {view === "challenges" && (
+          {view === "challenges" && authUser && (
             <div className="form-page">
               <div className="form-title">Сорилт</div>
               <div className="form-sub">Найзтайгаа өрсөлдөж үгийн сангаа ахиул</div>
@@ -4773,7 +5176,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           )}
 
           {/* ══ SHOP ══ */}
-          {view === "shop" && (
+          {view === "shop" && authUser && (
             <div className="page">
               <div className="form-title">Theme Shop</div>
               <div className="form-sub">Green theme үнэгүй. Бусад theme-үүдийг XP-ээр авч нээнэ.</div>
@@ -4874,7 +5277,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
               {myRank > 0 && (
                 <>
                   <div className="sec-head"><div className="sec-title">Таны байр</div></div>
-                  {leaderboard.filter((entry) => entry.id === authUser.id).map((entry) => (
+                  {leaderboard.filter((entry) => entry.id === authUser?.id).map((entry) => (
                     <div
                       key={entry.id}
                       className={`leader-row leader-self${leaderboardAnimated ? " animated" : ""}`}
@@ -4914,7 +5317,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                           return (
                             <div
                               key={entry.id}
-                              className={`podium-card rank-${rank}${entry.id === authUser.id ? " leader-self" : ""}`}
+                              className={`podium-card rank-${rank}${entry.id === authUser?.id ? " leader-self" : ""}`}
                               onClick={() => setProfileModalUser(entry)}
                               style={{ cursor: "pointer" }}
                             >
@@ -4932,7 +5335,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                                 {entry.mastered_words} mastered · {entry.words_count} word{entry.words_count === 1 ? "" : "s"} · {formatLastActive(getUserLastActive(entry.id, entry.last_active_at))}
                               </div>
 
-                              {entry.id !== authUser.id && (
+                              {authUser && entry.id !== authUser.id && (
                                 <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 8, position: "relative", zIndex: 1 }}>
 
                                   <button
@@ -4973,7 +5376,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                           return (
                             <div
                               key={entry.id}
-                              className={`leader-row${entry.id === authUser.id ? " leader-self" : ""}${leaderboardAnimated ? " animated" : ""}`}
+                              className={`leader-row${entry.id === authUser?.id ? " leader-self" : ""}${leaderboardAnimated ? " animated" : ""}`}
                               style={{ animationDelay: `${(index + 3) * 0.06}s`, cursor: "pointer" }}
                               onClick={() => setProfileModalUser(entry)}
                             >
@@ -4989,7 +5392,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }} onClick={(e) => e.stopPropagation()}>
                                 <div className="leader-xp">{entry.xp} XP</div>
 
-                                {entry.id !== authUser.id && (
+                                {authUser && entry.id !== authUser.id && (
                                   <>
 
                                     <button
@@ -5055,7 +5458,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           )}
 
 
-{view === "profile" && (
+{view === "profile" && authUser && (
   <div className="page pro-profile-page">
     <section className="pro-profile-hero">
       <div className="pro-profile-avatar">
@@ -5255,24 +5658,24 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             <div className="nav-btn-label">Нүүр</div>
           </button>
 
-          <button className={`nav-btn${view === "learn" ? " active" : ""}`} onClick={() => setView("learn")}>
+          <button className={`nav-btn${view === "learn" ? " active" : ""}`} onClick={() => openProtectedView("learn")}>
             <div className="nav-btn-icon">📚</div>
             <div className="nav-btn-label">Сурах</div>
           </button>
 
-          <button className={`nav-btn${view === "add-word" ? " active" : ""}`} onClick={() => setView("add-word")}>
+          <button className={`nav-btn${view === "add-word" ? " active" : ""}`} onClick={() => openProtectedView("add-word")}>
             <div className="nav-btn-icon">➕</div>
             <div className="nav-btn-label">Нэмэх</div>
           </button>
 
-          <button className={`nav-btn${view === "challenges" ? " active" : ""}`} onClick={() => setView("challenges")}>
+          <button className={`nav-btn${view === "challenges" ? " active" : ""}`} onClick={() => openProtectedView("challenges")}>
             <div className="nav-btn-icon">⭐</div>
             <div className="nav-btn-label">Сорилт</div>
           </button>
 
           <button
-            className={`nav-btn${view === "reader" ? " active" : ""}`}
-            onClick={() => setView("reader")}
+            className={`nav-btn${view === "library" || view === "reader" ? " active" : ""}`}
+            onClick={openLibraryView}
           >
             <div className="nav-btn-icon">📖</div>
             <div className="nav-btn-label">Ном</div>
@@ -5283,13 +5686,13 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             <div className="nav-btn-label">Rank</div>
           </button>
 
-          <button className={`nav-btn${view === "shop" ? " active" : ""}`} onClick={() => setView("shop")}>
+          <button className={`nav-btn${view === "shop" ? " active" : ""}`} onClick={() => openProtectedView("shop")}>
             <div className="nav-btn-icon">🛍️</div>
             <div className="nav-btn-label">Shop</div>
           </button>
-          <button className={`nav-btn${view === "profile" ? " active" : ""}`} onClick={() => setView("profile")}>
+          <button className={`nav-btn${view === "profile" ? " active" : ""}`} onClick={() => openProtectedView("profile")}>
             <div className="nav-btn-icon">
-              {authUser.avatar ? (
+              {authUser?.avatar ? (
                 <Image
                   src={authUser.avatar}
                   alt=""
@@ -5310,7 +5713,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           </button>
         </nav>
 
-        <button
+        {authUser && <button
           type="button"
           className={`floating-chat-btn${chatDrawerOpen ? " open" : ""}`}
           onClick={() => {
@@ -5339,7 +5742,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           {totalUnreadChats > 0 && (
             <span className="floating-chat-badge">{totalUnreadChats}</span>
           )}
-        </button>
+        </button>}
 
         {notice && <div className="notice-toast">{notice}</div>}
       </div>

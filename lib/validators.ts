@@ -17,6 +17,13 @@ export const masterySchema = z.object({
   mastery: z.number().int().min(0).max(5)
 });
 
+export const updateWordSchema = z.object({
+  term: z.string().trim().min(1).max(120),
+  meaning: z.string().trim().min(1).max(500),
+  example: z.string().trim().max(500).default(""),
+  categoryId: z.string().uuid().nullable().optional(),
+});
+
 export const challengeSchema = z.object({
   title: z.string().trim().min(1).max(120),
   categoryId: z.string().uuid().nullable().optional(),

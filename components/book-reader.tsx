@@ -1,6 +1,8 @@
 "use client";
 
 import { WordData } from "@/lib/push";
+import Link from "next/link";
+import { AuthModal } from "./AuthModal";
 import type {
   ChangeEvent,
   Key,
@@ -78,6 +80,25 @@ type LoadedBook = {
   chapters?: BookChapter[];
 };
 
+type ImportedBookState = {
+  id?: string;
+  name: string;
+  text: string;
+  importedAt: number;
+};
+
+type UserStateResponse = {
+  state: Record<string, unknown> | null;
+};
+
+type ReaderAuthUser = {
+  id: string;
+  name: string;
+  email?: string;
+  avatar: string | null;
+  bio: string;
+};
+
 const DIFFICULTY_COLORS: Record<string, { bg: string; text: string }> = {
   easy: { bg: "#d1fae5", text: "#065f46" },
   medium: { bg: "#fef3c7", text: "#92400e" },
@@ -96,6 +117,8 @@ const FORM_LABELS: Record<string, string> = {
 };
 
 export default function BookReader({ bookId }: { bookId?: string }) {
+  const [readerAuthUser, setReaderAuthUser] = useState<ReaderAuthUser | null>(null);
+  const [readerAuthChecked, setReaderAuthChecked] = useState(false);
   const [bookText, setBookText] = useState("");
   const [book, setBook] = useState<LoadedBook | null>(null);
   const [chapters, setChapters] = useState<BookChapter[]>([]);
@@ -117,21 +140,24 @@ export default function BookReader({ bookId }: { bookId?: string }) {
   const [vocabOpen, setVocabOpen] = useState(false);
   const [savedWords, setSavedWords] = useState<SavedWord[]>([]);
   const [toast, setToast] = useState("");
+  const [readerStateLoaded, setReaderStateLoaded] = useState(false);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
 
-  function scrollToTop() {
-    if (bodyRef.current) {
-      bodyRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    }
+  function scrollToTop(behavior: ScrollBehavior = "smooth") {
+    requestAnimationFrame(() => {
+      if (bodyRef.current) {
+        bodyRef.current.scrollIntoView({
+          behavior,
+          block: "start",
+        });
+      }
 
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
+      window.scrollTo({
+        top: 0,
+        behavior,
+      });
     });
   }
 
@@ -154,7 +180,75 @@ export default function BookReader({ bookId }: { bookId?: string }) {
     ];
   }
 
+  async function saveUserState(key: string, value: unknown) {
+    await fetch("/api/user-state", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ key, value }),
+    }).catch(() => {
+      // Local storage remains the fallback when logged out or offline.
+    });
+  }
+
+  function applyImportedBook(saved: ImportedBookState) {
+    const importedChapters = splitImportedTextIntoOneChapter(
+      saved.text,
+      saved.name
+    );
+
+    setBook({
+      id: saved.importedAt,
+      title: saved.name.replace(/\.txt$/i, ""),
+      authors: "Imported book",
+      cover: null,
+      text: saved.text,
+      chapters: importedChapters,
+    });
+
+    setChapters(importedChapters);
+    setChapterIndex(0);
+    setBookText(importedChapters[0].text);
+    setLoadError("");
+    setPageIndex(0);
+    closePopup();
+    scrollToTop("auto");
+  }
+
+  function saveImportedBookToLibrary(importedBook: ImportedBookState) {
+    const bookWithId = {
+      ...importedBook,
+      id: importedBook.id ?? `imported-${importedBook.importedAt}`,
+    };
+
+    try {
+      const raw = localStorage.getItem("imported-books");
+      const currentBooks = raw ? (JSON.parse(raw) as ImportedBookState[]) : [];
+      const nextBooks = [
+        bookWithId,
+        ...currentBooks.filter(
+          (book) =>
+            (book.id ?? `imported-${book.importedAt}`) !== bookWithId.id &&
+            book.name !== bookWithId.name
+        ),
+      ];
+
+      localStorage.setItem("imported-books", JSON.stringify(nextBooks));
+      void saveUserState("imported-books", nextBooks);
+    } catch {
+      localStorage.setItem("imported-books", JSON.stringify([bookWithId]));
+      void saveUserState("imported-books", [bookWithId]);
+    }
+  }
+
   function handleBookUpload(event: ChangeEvent<HTMLInputElement>) {
+    if (!readerAuthUser) {
+      event.target.value = "";
+      setLoadError("Ном import хийж уншихын тулд эхлээд бүртгүүлнэ үү.");
+      return;
+    }
+
     const file = event.target.files?.[0];
 
     if (!file) return;
@@ -177,33 +271,23 @@ export default function BookReader({ bookId }: { bookId?: string }) {
         return;
       }
 
-      const importedChapters = splitImportedTextIntoOneChapter(text, file.name);
-
-      setBook({
-        id: Date.now(),
-        title: file.name.replace(/\.txt$/i, ""),
-        authors: "Imported book",
-        cover: null,
+      const importedAt = Date.now();
+      const importedBook = {
+        id: `imported-${importedAt}`,
+        name: file.name,
         text,
-        chapters: importedChapters,
-      });
+        importedAt,
+      };
 
-      setChapters(importedChapters);
-      setChapterIndex(0);
-      setBookText(importedChapters[0].text);
-      setLoadError("");
-      setPageIndex(0);
-      closePopup();
-      scrollToTop();
+      applyImportedBook(importedBook);
+      saveImportedBookToLibrary(importedBook);
 
       localStorage.setItem(
         "last-imported-book",
-        JSON.stringify({
-          name: file.name,
-          text,
-          importedAt: Date.now(),
-        })
+        JSON.stringify(importedBook)
       );
+      localStorage.setItem("selected-imported-book", JSON.stringify(importedBook));
+      void saveUserState("last-imported-book", importedBook);
     };
 
     reader.onerror = () => {
@@ -222,40 +306,30 @@ export default function BookReader({ bookId }: { bookId?: string }) {
         return;
       }
 
-      const saved = JSON.parse(raw) as {
-        name: string;
-        text: string;
-        importedAt: number;
-      };
-
-      const importedChapters = splitImportedTextIntoOneChapter(
-        saved.text,
-        saved.name
-      );
-
-      setBook({
-        id: saved.importedAt,
-        title: saved.name.replace(/\.txt$/i, ""),
-        authors: "Imported book",
-        cover: null,
-        text: saved.text,
-        chapters: importedChapters,
-      });
-
-      setChapters(importedChapters);
-      setChapterIndex(0);
-      setBookText(importedChapters[0].text);
-      setLoadError("");
-      setPageIndex(0);
-      closePopup();
-      scrollToTop();
+      applyImportedBook(JSON.parse(raw) as ImportedBookState);
     } catch {
       setLoadError("Хадгалсан ном уншиж чадсангүй.");
     }
   }
 
   useEffect(() => {
-    if (!bookId) return;
+    fetch("/api/auth/me")
+      .then((res) => res.json())
+      .then((data: { user: ReaderAuthUser | null }) => {
+        setReaderAuthUser(data.user ?? null);
+      })
+      .catch(() => setReaderAuthUser(null))
+      .finally(() => setReaderAuthChecked(true));
+  }, []);
+
+  useEffect(() => {
+    if ("scrollRestoration" in window.history) {
+      window.history.scrollRestoration = "manual";
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!bookId || !readerAuthUser) return;
 
     async function loadBook() {
       try {
@@ -291,14 +365,30 @@ export default function BookReader({ bookId }: { bookId?: string }) {
         setChapterIndex(0);
         setBookText(loadedChapters[0]?.text || data.text || "");
         setPageIndex(0);
-        scrollToTop();
+        scrollToTop("auto");
       } catch {
         setLoadError("Ном ачаалж чадсангүй.");
       }
     }
 
     loadBook();
-  }, [bookId]);
+  }, [bookId, readerAuthUser]);
+
+  useEffect(() => {
+    if (bookId || !readerAuthUser) return;
+
+    try {
+      const raw = localStorage.getItem("selected-imported-book");
+
+      if (!raw) return;
+
+      applyImportedBook(JSON.parse(raw) as ImportedBookState);
+    } catch {
+      setLoadError("Сонгосон import номыг уншиж чадсангүй.");
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookId, readerAuthUser]);
 
   useEffect(() => {
     try {
@@ -310,11 +400,57 @@ export default function BookReader({ bookId }: { bookId?: string }) {
     } catch {
       // ignore
     }
-  }, []);
+
+    if (!readerAuthUser) {
+      setReaderStateLoaded(true);
+      return;
+    }
+
+    fetch("/api/user-state")
+      .then(async (res) => {
+        if (!res.ok) return null;
+        return (await res.json()) as UserStateResponse;
+      })
+      .then((data) => {
+        const state = data?.state;
+
+        if (!state) return;
+
+        if (Array.isArray(state["reader-vocab"])) {
+          setSavedWords(state["reader-vocab"] as SavedWord[]);
+          localStorage.setItem(
+            "reader-vocab",
+            JSON.stringify(state["reader-vocab"])
+          );
+        }
+
+        const importedBook = state["last-imported-book"];
+
+        if (
+          importedBook &&
+          typeof importedBook === "object" &&
+          "name" in importedBook &&
+          "text" in importedBook &&
+          "importedAt" in importedBook
+        ) {
+          localStorage.setItem(
+            "last-imported-book",
+            JSON.stringify(importedBook)
+          );
+        }
+      })
+      .catch(() => {
+        // Logged-out users keep the local browser copy.
+      })
+      .finally(() => setReaderStateLoaded(true));
+  }, [readerAuthUser]);
 
   useEffect(() => {
     localStorage.setItem("reader-vocab", JSON.stringify(savedWords));
-  }, [savedWords]);
+    if (readerStateLoaded) {
+      void saveUserState("reader-vocab", savedWords);
+    }
+  }, [readerStateLoaded, savedWords]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -520,6 +656,29 @@ export default function BookReader({ bookId }: { bookId?: string }) {
   const isLastPage =
     pageIndex >= pages.length - 1 && chapterIndex >= chapters.length - 1;
 
+  if (!readerAuthChecked) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "#f5f0e8",
+          fontFamily: "DM Sans, sans-serif",
+          fontWeight: 800,
+          color: "#6b5e4e",
+        }}
+      >
+        Уншигчийг бэлдэж байна...
+      </div>
+    );
+  }
+
+  if (!readerAuthUser) {
+    return <AuthModal onAuth={(user) => setReaderAuthUser(user)} />;
+  }
+
   return (
     <>
       <style>{`
@@ -618,6 +777,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
           font-family: 'DM Sans', sans-serif;
           font-size: 0.82rem;
           font-weight: 600;
+          text-decoration: none;
           cursor: pointer;
           transition: border-color 0.15s, background 0.15s;
           white-space: nowrap;
@@ -1493,6 +1653,13 @@ export default function BookReader({ bookId }: { bookId?: string }) {
           box-shadow: 0 8px 20px rgba(122,52,16,0.22);
         }
 
+        .empty-book-actions {
+          display: flex;
+          justify-content: center;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
         @media (max-width: 720px) {
           .br-topbar {
             align-items: flex-start;
@@ -1533,9 +1700,9 @@ export default function BookReader({ bookId }: { bookId?: string }) {
       <div className="br-root">
         <div className="br-topbar">
           <div className="br-left">
-            <a href="/" className="br-back-btn">
+            <Link href="/" className="br-back-btn">
             ← Library
-            </a>
+            </Link>
 
             <div className="br-book-meta">
               <div className="br-title">📖 {book?.title || "Номын Уншигч"}</div>
@@ -1571,6 +1738,10 @@ export default function BookReader({ bookId }: { bookId?: string }) {
             <button className="br-vocab-btn" onClick={loadLastImportedBook}>
               Сүүлд уншсан
             </button>
+
+            <Link className="br-vocab-btn" href="/?view=library">
+              Номын сан
+            </Link>
 
             <button className="br-vocab-btn" onClick={() => setVocabOpen(true)}>
               Үгийн сан
@@ -1662,15 +1833,21 @@ export default function BookReader({ bookId }: { bookId?: string }) {
               {loadError && <p className="empty-book-error">{loadError}</p>}
 
               {!bookId && (
-                <label className="import-main-btn">
-                  .txt ном сонгох
-                  <input
-                    type="file"
-                    accept=".txt,text/plain"
-                    onChange={handleBookUpload}
-                    style={{ display: "none" }}
-                  />
-                </label>
+                <div className="empty-book-actions">
+                  <label className="import-main-btn">
+                    .txt ном сонгох
+                    <input
+                      type="file"
+                      accept=".txt,text/plain"
+                      onChange={handleBookUpload}
+                      style={{ display: "none" }}
+                    />
+                  </label>
+
+                  <Link className="import-main-btn" href="/?view=library">
+                    Номын сангаас сонгох
+                  </Link>
+                </div>
               )}
             </div>
           )}
@@ -1923,7 +2100,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
 
                     <div className="example-box">
                       <p className="example-en">
-                        "{wordData.example_sentence_en}"
+                        &quot;{wordData.example_sentence_en}&quot;
                       </p>
 
                       <p className="example-mn">
@@ -2008,7 +2185,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
                             {phrase.translation}
                           </p>
                           <p className="phrase-ex-en">
-                            "{phrase.example_en}"
+                            &quot;{phrase.example_en}&quot;
                           </p>
                           <p className="phrase-ex-mn">
                             {phrase.example_mn}
@@ -2084,7 +2261,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
                   <div style={{ fontSize: "2.5rem" }}>📖</div>
 
                   <p>
-                    Үг дараад <strong>"+ Үгийн санд нэмэх"</strong> товч дарж
+                    Үг дараад <strong>&quot;+ Үгийн санд нэмэх&quot;</strong> товч дарж
                     цуглуулаарай.
                   </p>
                 </div>

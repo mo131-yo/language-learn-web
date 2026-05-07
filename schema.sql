@@ -67,3 +67,13 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS user_app_state (
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  state_key TEXT NOT NULL,
+  state_value JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, state_key)
+);
+
+CREATE INDEX IF NOT EXISTS user_app_state_user_idx ON user_app_state(user_id);
