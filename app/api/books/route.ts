@@ -89,6 +89,7 @@ async function fetchGutendexPage(options: {
   }
 
   const res = await fetch(url.toString(), {
+    signal: AbortSignal.timeout(10000),
     next: {
       revalidate: 60 * 60 * 24,
     },
@@ -130,6 +131,9 @@ export async function GET(req: NextRequest) {
           search,
           topic,
           page: pageNumber,
+        }).catch((error) => {
+          console.error("Gutendex page fetch failed:", error);
+          return { results: [], count: 0, next: null };
         })
       )
     );

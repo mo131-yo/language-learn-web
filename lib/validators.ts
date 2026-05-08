@@ -36,6 +36,33 @@ export const joinChallengeSchema = z.object({
   displayName: z.string().trim().min(1).max(80)
 });
 
+export const duelCreateSchema = z.object({
+  opponentId: z.string().uuid(),
+  categoryId: z.string().uuid().nullable().optional(),
+  stakeXp: z.coerce.number().int().min(10).max(10000),
+  timeLimitSeconds: z.coerce.number().int().min(10).max(120).default(30),
+});
+
+export const duelSubmitSchema = z.object({
+  answers: z
+    .array(
+      z.object({
+        wordId: z.string().uuid(),
+        answer: z.string().trim().max(500),
+        timeMs: z.coerce.number().int().min(0).max(120000),
+      })
+    )
+    .min(1)
+    .max(20),
+});
+
+export const quizAttemptSchema = z.object({
+  categoryId: z.string().uuid().nullable().optional(),
+  score: z.coerce.number().int().min(0).max(100),
+  correctCount: z.coerce.number().int().min(0),
+  totalCount: z.coerce.number().int().min(1).max(500),
+});
+
 export const subscribeSchema = z.object({
   memberName: z.string().trim().min(1).max(80),
   subscription: z.object({

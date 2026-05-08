@@ -11,6 +11,7 @@ import type {
   ReactNode,
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { Category, Word } from "@/lib/types";
 
 function splitText(text: string) {
   return text.split(/(\s+|[.,!?;:"""''()[\]—\-]+)/g).filter(Boolean);
@@ -100,6 +101,12 @@ type ReaderAuthUser = {
   bio: string;
 };
 
+type ExplainWordResponse = WordData & {
+  savedWord?: Word | null;
+  category?: Category | null;
+  from_cache?: boolean;
+};
+
 const DIFFICULTY_COLORS: Record<string, { bg: string; text: string }> = {
   easy: { bg: "#d1fae5", text: "#065f46" },
   medium: { bg: "#fef3c7", text: "#92400e" },
@@ -117,7 +124,13 @@ const FORM_LABELS: Record<string, string> = {
   Superlative: "Давуу зэрэг",
 };
 
-export default function BookReader({ bookId }: { bookId?: string }) {
+export default function BookReader({
+  bookId,
+  onBookWordSaved,
+}: {
+  bookId?: string;
+  onBookWordSaved?: (payload: { word: Word; category?: Category | null }) => void;
+}) {
   const [readerAuthUser, setReaderAuthUser] = useState<ReaderAuthUser | null>(null);
   const [readerAuthChecked, setReaderAuthChecked] = useState(false);
   const [bookText, setBookText] = useState("");
@@ -517,6 +530,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
         body: JSON.stringify({
           word: clickedWord,
           sentence,
+          bookTitle: book?.title ?? chapters[chapterIndex]?.title ?? "Imported Book",
         }),
       });
 
@@ -524,13 +538,19 @@ export default function BookReader({ bookId }: { bookId?: string }) {
         throw new Error("Failed");
       }
 
-      const data = await res.json();
+      const data = (await res.json()) as ExplainWordResponse;
 
       if (data.from_cache) {
         setFromCache(true);
       }
 
       setWordData(data);
+
+      if (data.savedWord) {
+        onBookWordSaved?.({ word: data.savedWord, category: data.category ?? null });
+      }
+
+      saveWord(data);
     } catch {
       setApiError("AI тайлбар авахад алдаа гарлаа.");
     } finally {
@@ -729,7 +749,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
 
         .br-back-btn:hover {
           background: #7a3410;
-          color: #ffffff;
+          color: #374151;
           border-color: #7a3410;
           transform: translateX(-2px);
         }
@@ -1376,7 +1396,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
         .vocab-overlay {
           position: fixed;
           inset: 0;
-          background: rgba(26,22,18,0.45);
+          background: rgba(26,22,18,0.28);
           z-index: 200;
           backdrop-filter: blur(4px);
           animation: fadeIn 0.18s ease;
@@ -1397,7 +1417,8 @@ export default function BookReader({ bookId }: { bookId?: string }) {
           top: 0;
           bottom: 0;
           width: min(420px, 100vw);
-          background: var(--paper);
+          background: #fffaf2;
+          color: #1f2937;
           border-left: 1px solid var(--border);
           box-shadow: -12px 0 40px rgba(60,40,10,0.18);
           z-index: 201;
@@ -1428,7 +1449,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
           font-family: 'Lora', serif;
           font-size: 1.2rem;
           font-weight: 700;
-          color: var(--ink);
+          color: #1f2937;
         }
 
         .vocab-stats {
@@ -1451,7 +1472,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
         .vocab-stat-val {
           font-size: 1.4rem;
           font-weight: 700;
-          color: var(--ink);
+          color: #1f2937;
           font-family: 'Lora', serif;
         }
 
@@ -1460,7 +1481,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
           font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.08em;
-          color: var(--ink-light);
+          color: #6b7280;
           margin-top: 2px;
         }
 
@@ -1493,12 +1514,12 @@ export default function BookReader({ bookId }: { bookId?: string }) {
           font-family: 'Lora', serif;
           font-size: 1rem;
           font-weight: 600;
-          color: var(--ink);
+          color: #111827;
         }
 
         .vocab-item-trans {
           font-size: 0.8rem;
-          color: var(--ink-light);
+          color: #4b5563;
           margin-top: 2px;
         }
 
@@ -1552,7 +1573,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
         .vocab-empty {
           text-align: center;
           padding: 48px 20px;
-          color: var(--ink-light);
+          color: #ffffff;
         }
 
         .vocab-empty p {

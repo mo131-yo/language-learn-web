@@ -1,14 +1,82 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { ensureTable, getFromCache, WordData, saveToCache } from "@/lib/push";
+import { getSessionUser } from "@/lib/auth-helpers";
+import { queryOne } from "@/lib/db";
+import { broadcast } from "@/lib/sse-store";
+import type { Category, Word } from "@/lib/types";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_KEY,
 });
 
+function normalizeBookCategoryName(bookTitle: unknown) {
+  const title = typeof bookTitle === "string" ? bookTitle.trim() : "";
+  if (!title) return null;
+  return title.slice(0, 80);
+}
+
+async function saveBookWordToPublicVocab(options: {
+  bookTitle: unknown;
+  data: WordData;
+  sentence: unknown;
+}) {
+  const categoryName = normalizeBookCategoryName(options.bookTitle);
+
+  if (!categoryName) return null;
+
+  const sessionUser = await getSessionUser();
+  const category = await queryOne<Category>(
+    `insert into categories (name, color)
+     values ($1, '#22c55e')
+     on conflict (name) do update set name = excluded.name
+     returning *`,
+    [categoryName]
+  );
+
+  if (!category) return null;
+
+  const term = (options.data.base_form || options.data.word).trim();
+  const meaning = options.data.primary_translation.trim();
+  const example =
+    typeof options.sentence === "string"
+      ? options.sentence.trim().slice(0, 500)
+      : options.data.example_sentence_en?.slice(0, 500) ?? "";
+
+  const word = await queryOne<Word>(
+    `with inserted as (
+       insert into words (term, meaning, example, category_id, author_name, author_id)
+       select $1, $2, $3, $4, $5, $6
+       where not exists (
+         select 1
+         from words
+         where category_id = $4 and lower(term) = lower($1)
+       )
+       returning *
+     )
+     select inserted.*, c.name as category_name, c.color as category_color
+     from inserted
+     left join categories c on c.id = inserted.category_id`,
+    [
+      term,
+      meaning,
+      example,
+      category.id,
+      sessionUser?.name ?? "Book reader",
+      sessionUser?.userId ?? null,
+    ]
+  );
+
+  if (word) {
+    broadcast("word-added", word);
+  }
+
+  return { category, word };
+}
+
 export async function POST(req: Request) {
   try {
-    const { word, sentence } = await req.json();
+    const { word, sentence, bookTitle } = await req.json();
 
     if (!word || typeof word !== "string") {
       return NextResponse.json({ error: "word is required" }, { status: 400 });
@@ -21,7 +89,8 @@ export async function POST(req: Request) {
 
     const cached = await getFromCache(cacheKey);
     if (cached) {
-      return NextResponse.json({ ...cached, from_cache: true });
+      const saved = await saveBookWordToPublicVocab({ bookTitle, data: cached, sentence });
+      return NextResponse.json({ ...cached, from_cache: true, savedWord: saved?.word ?? null, category: saved?.category ?? null });
     }
 
     const response = await client.chat.completions.create({
@@ -102,8 +171,9 @@ IMPORTANT: If the word is NOT inflected (is_inflected: false), still include the
     }
 
     await saveToCache(cacheKey, data);
+    const saved = await saveBookWordToPublicVocab({ bookTitle, data, sentence });
 
-    return NextResponse.json(data);
+    return NextResponse.json({ ...data, savedWord: saved?.word ?? null, category: saved?.category ?? null });
   } catch (error) {
     console.error("Explain word API error:", error);
     return NextResponse.json({ error: "Failed to explain word" }, { status: 500 });

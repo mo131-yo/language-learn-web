@@ -210,6 +210,82 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS user_word_mastery_word_idx ON user_word_mastery(word_id)`,
 
   // ─────────────────────────────────────────────────────────────
+  // USER XP LEDGER
+  // Үг цээжилснээс гадна 1v1 бооцоот сорилтын XP нэмэх/хасах бүртгэл.
+  // ─────────────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS user_xp_ledger (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount      INTEGER     NOT NULL,
+    reason      TEXT        NOT NULL,
+    source_type TEXT        NOT NULL DEFAULT 'manual',
+    source_id   UUID,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+
+  `CREATE INDEX IF NOT EXISTS user_xp_ledger_user_idx ON user_xp_ledger(user_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS user_xp_ledger_source_unique_idx
+   ON user_xp_ledger(user_id, source_type, source_id)
+   WHERE source_id IS NOT NULL`,
+
+  // ─────────────────────────────────────────────────────────────
+  // QUIZ ATTEMPTS
+  // Шалгалтын оноо, сонгосон төрөл, дундаж хувийн leaderboard-д хэрэглэнэ.
+  // ─────────────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS quiz_attempts (
+    id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category_id   UUID        REFERENCES categories(id) ON DELETE SET NULL,
+    score         INTEGER     NOT NULL,
+    correct_count INTEGER     NOT NULL,
+    total_count   INTEGER     NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+
+  `CREATE INDEX IF NOT EXISTS quiz_attempts_user_idx ON quiz_attempts(user_id)`,
+  `CREATE INDEX IF NOT EXISTS quiz_attempts_category_idx ON quiz_attempts(category_id)`,
+
+  // ─────────────────────────────────────────────────────────────
+  // 1V1 DUELS
+  // Найз эсвэл бусад хэрэглэгчтэй XP бооцоотой хурдан үгийн сорилт.
+  // ─────────────────────────────────────────────────────────────
+  `CREATE TABLE IF NOT EXISTS duel_challenges (
+    id                   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    challenger_id        UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    opponent_id          UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    category_id          UUID        REFERENCES categories(id) ON DELETE SET NULL,
+    stake_xp             INTEGER     NOT NULL,
+    time_limit_seconds   INTEGER     NOT NULL DEFAULT 30,
+    words                JSONB       NOT NULL DEFAULT '[]'::jsonb,
+    challenger_answers   JSONB,
+    opponent_answers     JSONB,
+    challenger_score     INTEGER,
+    opponent_score       INTEGER,
+    winner_id            UUID        REFERENCES users(id) ON DELETE SET NULL,
+    status               TEXT        NOT NULL DEFAULT 'pending',
+    settled_at           TIMESTAMPTZ,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS category_id UUID REFERENCES categories(id) ON DELETE SET NULL`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS time_limit_seconds INTEGER NOT NULL DEFAULT 30`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS words JSONB NOT NULL DEFAULT '[]'::jsonb`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS challenger_answers JSONB`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS opponent_answers JSONB`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS challenger_score INTEGER`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS opponent_score INTEGER`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS winner_id UUID REFERENCES users(id) ON DELETE SET NULL`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+  `ALTER TABLE duel_challenges ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+
+  `CREATE INDEX IF NOT EXISTS duel_challenges_challenger_idx ON duel_challenges(challenger_id)`,
+  `CREATE INDEX IF NOT EXISTS duel_challenges_opponent_idx ON duel_challenges(opponent_id)`,
+  `CREATE INDEX IF NOT EXISTS duel_challenges_status_idx ON duel_challenges(status)`,
+
+  // ─────────────────────────────────────────────────────────────
   // USER APP STATE
   // Browser дээр үлддэг reader/social/theme/XP-spend state-ийг user-аар DB-д хадгална.
   // ─────────────────────────────────────────────────────────────

@@ -25,6 +25,8 @@ import Image from "next/image";
 import type {
   Category,
   Challenge,
+  DuelAnswer,
+  DuelChallenge,
   LeaderboardUser,
   Word,
 } from "@/lib/types";
@@ -40,6 +42,7 @@ type HomeData = {
   categories: Category[];
   words: Word[];
   challenges: Challenge[];
+  duels: DuelChallenge[];
   leaderboard: LeaderboardUser[];
 };
 
@@ -114,6 +117,16 @@ type XpEvent = {
   amount: number;
   reason: string;
 };
+
+type DuelSession = {
+  duel: DuelChallenge;
+  index: number;
+  answers: DuelAnswer[];
+  answer: string;
+  wordStartedAt: number;
+};
+
+type LeaderboardSortMode = "xp" | "quiz";
 
 const PALETTE = [
   "#22c55e",
@@ -1273,6 +1286,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [categories, setCategories] = useState(initialData.categories);
   const [words, setWords] = useState(initialData.words);
   const [challenges, setChallenges] = useState(initialData.challenges);
+  const [duels, setDuels] = useState(initialData.duels ?? []);
   const [leaderboard, setLeaderboard] = useState(initialData.leaderboard);
 
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -1294,6 +1308,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [copiedCode, setCopiedCode] = useState("");
   const [sharedCode, setSharedCode] = useState("");
   const [recentChallenge, setRecentChallenge] = useState<Challenge | null>(null);
+  const [duelSession, setDuelSession] = useState<DuelSession | null>(null);
   const [challengeDuration, setChallengeDuration] = useState(7);
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
   const [addWordCategoryMode, setAddWordCategoryMode] = useState<"existing" | "new">("existing");
@@ -1338,6 +1353,8 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   // NEW: Profile modal, chat, likes, XP toasts
   const [profileModalUser, setProfileModalUser] = useState<LeaderboardUser | null>(null);
   const [leaderboardLikes, setLeaderboardLikes] = useState<Record<string, boolean>>({});
+  const [leaderboardSortMode, setLeaderboardSortMode] = useState<LeaderboardSortMode>("xp");
+  const [quizAttemptSavedKey, setQuizAttemptSavedKey] = useState("");
   const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
   const [chatInput, setChatInput] = useState("");
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
@@ -1887,7 +1904,16 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const masteredCount = words.filter((w) => w.mastery >= 4).length;
   const learningCount = words.filter((w) => w.mastery > 0 && w.mastery < 4).length;
   const topLeaders = leaderboard.slice(0, 5);
-  const podiumLeaders = leaderboard.slice(0, 3);
+  const sortedLeaderboard = useMemo(() => {
+    return [...leaderboard].sort((a, b) => {
+      if (leaderboardSortMode === "quiz") {
+        if (b.quiz_average !== a.quiz_average) return b.quiz_average - a.quiz_average;
+        if (b.quiz_attempts !== a.quiz_attempts) return b.quiz_attempts - a.quiz_attempts;
+      }
+      return b.xp - a.xp;
+    });
+  }, [leaderboard, leaderboardSortMode]);
+  const podiumLeaders = sortedLeaderboard.slice(0, 3);
   const currentUserLeaderboardEntry = authUser
     ? leaderboard.find((entry) => entry.id === authUser.id) ?? null
     : null;
@@ -1913,7 +1939,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     : 100;
   const xpToNextTitle = nextTitleLevel ? Math.max(nextTitleLevel.xp - xpTotal, 0) : 0;
   const myRank = authUser
-    ? leaderboard.findIndex((entry) => entry.id === authUser.id) + 1
+    ? sortedLeaderboard.findIndex((entry) => entry.id === authUser.id) + 1
     : 0;
   const dailyGoalPct = Math.min(
     100,
@@ -1936,6 +1962,16 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     )
     .map((r) => (r.fromId === authUser?.id ? r.toId : r.fromId));
   const friendUsers = leaderboard.filter((entry) => acceptedFriendIds.includes(entry.id));
+  const duelOpponents = leaderboard
+    .filter((entry) => entry.id !== authUser?.id)
+    .sort((a, b) => {
+      const aFriend = acceptedFriendIds.includes(a.id) ? 0 : 1;
+      const bFriend = acceptedFriendIds.includes(b.id) ? 0 : 1;
+      if (aFriend !== bFriend) return aFriend - bFriend;
+      return b.xp - a.xp;
+    });
+  const activeDuels = duels.filter((duel) => duel.status !== "completed" && duel.status !== "cancelled");
+  const completedDuels = duels.filter((duel) => duel.status === "completed").slice(0, 5);
   const activeChatUser =
     friendUsers.find((entry) => entry.id === activeChatUserId) ?? null;
   const totalUnreadChats = friendUsers.reduce(
@@ -2281,6 +2317,21 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     }
   }
 
+  function handleBookWordSaved(payload: { word: Word; category?: Category | null }) {
+    if (payload.category) {
+      setCategories((prev) =>
+        [...prev.filter((category) => category.id !== payload.category!.id), payload.category!].sort(
+          (a, b) => a.name.localeCompare(b.name)
+        )
+      );
+    }
+
+    setWords((prev) => [
+      payload.word,
+      ...prev.filter((word) => word.id !== payload.word.id),
+    ]);
+  }
+
   async function createCategoryByName(name: string, color?: string) {
     const trimmedName = name.trim();
     if (!trimmedName) throw new Error("Ангиллын нэрээ оруулна уу");
@@ -2348,6 +2399,8 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
               xp: Math.max(xpDelta, 0),
               words_count: updatedWord.mastery > 0 ? 1 : 0,
               mastered_words: updatedWord.mastery >= 4 ? 1 : 0,
+              quiz_attempts: 0,
+              quiz_average: 0,
             });
           }
 
@@ -2450,6 +2503,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     setQuizCompleted(false);
     setQuizWrongWordIds([]);
     setQuizWordIds(wordIds ?? null);
+    setQuizAttemptSavedKey("");
   }
 
   function nextCard() {
@@ -2498,6 +2552,44 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     }
     void updateMastery(currentWord, correct ? 1 : -1);
   }
+
+  useEffect(() => {
+    if (!quizCompleted || mode !== "quiz" || !authUser || studyWords.length === 0) return;
+
+    const attemptKey = `${selectedCategory}:${studyWords.map((word) => word.id).join(",")}:${quizScore}:${quizCorrectCount}`;
+    if (quizAttemptSavedKey === attemptKey) return;
+
+    setQuizAttemptSavedKey(attemptKey);
+    void postJson("/api/quiz-attempts", {
+      categoryId: selectedCategory === "all" ? null : selectedCategory,
+      score: quizScore,
+      correctCount: quizCorrectCount,
+      totalCount: studyWords.length,
+    }).then(() => {
+      setLeaderboard((prev) =>
+        prev.map((entry) => {
+          if (entry.id !== authUser.id) return entry;
+          const attempts = (entry.quiz_attempts ?? 0) + 1;
+          const average = Math.round(
+            (((entry.quiz_average ?? 0) * (entry.quiz_attempts ?? 0)) + quizScore) / attempts
+          );
+          return { ...entry, quiz_attempts: attempts, quiz_average: average };
+        })
+      );
+    }).catch(() => {
+      setNotice("Шалгалтын дүн хадгалахад алдаа гарлаа.");
+    });
+  }, [
+    authUser,
+    mode,
+    postJson,
+    quizAttemptSavedKey,
+    quizCompleted,
+    quizCorrectCount,
+    quizScore,
+    selectedCategory,
+    studyWords,
+  ]);
 
   async function createChallenge(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -2562,6 +2654,156 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       refreshAfterMutation();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Алдаа гарлаа");
+    }
+  }
+
+  function updateDuelFromServer(nextDuel: DuelChallenge) {
+    const previous = duels.find((duel) => duel.id === nextDuel.id) ?? null;
+
+    setDuels((prev) => [
+      nextDuel,
+      ...prev.filter((duel) => duel.id !== nextDuel.id),
+    ]);
+
+    if (
+      previous?.status !== "completed" &&
+      nextDuel.status === "completed" &&
+      nextDuel.winner_id
+    ) {
+      const loserId =
+        nextDuel.winner_id === nextDuel.challenger_id
+          ? nextDuel.opponent_id
+          : nextDuel.challenger_id;
+
+      setLeaderboard((prev) =>
+        prev
+          .map((entry) => {
+            if (entry.id === nextDuel.winner_id) {
+              return { ...entry, xp: entry.xp + nextDuel.stake_xp };
+            }
+            if (entry.id === loserId) {
+              return { ...entry, xp: Math.max(entry.xp - nextDuel.stake_xp, 0) };
+            }
+            return entry;
+          })
+          .sort((a, b) => b.xp - a.xp)
+      );
+
+      if (authUser?.id === nextDuel.winner_id) {
+        addXpEvent("gain", nextDuel.stake_xp, "1v1 ялалт");
+      } else if (authUser?.id === loserId) {
+        addXpEvent("loss", nextDuel.stake_xp, "1v1 бооцоо");
+      }
+    }
+  }
+
+  async function refreshDuels() {
+    try {
+      const freshDuels = await fetch("/api/duels").then((res) => {
+        if (!res.ok) throw new Error("1v1 мэдээлэл авахад алдаа гарлаа.");
+        return res.json() as Promise<DuelChallenge[]>;
+      });
+      setDuels(freshDuels);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Алдаа гарлаа");
+    }
+  }
+
+  async function createDuel(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setBusy("duel");
+    const form = new FormData(e.currentTarget);
+
+    try {
+      const created = await postJson<DuelChallenge>("/api/duels", {
+        opponentId: form.get("opponentId"),
+        categoryId: form.get("categoryId") || null,
+        stakeXp: form.get("stakeXp"),
+        timeLimitSeconds: form.get("timeLimitSeconds"),
+      });
+
+      updateDuelFromServer(created);
+      setNotice("✓ 1v1 урилга илгээлээ");
+      e.currentTarget.reset();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Алдаа гарлаа");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function acceptDuel(duelId: string) {
+    try {
+      const accepted = await postJson<DuelChallenge>(`/api/duels/${duelId}/accept`, {});
+      updateDuelFromServer(accepted);
+      setNotice("✓ 1v1 эхэллээ");
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Алдаа гарлаа");
+    }
+  }
+
+  function startDuel(duel: DuelChallenge) {
+    const alreadySubmitted =
+      duel.challenger_id === authUser?.id ? duel.challenger_answers : duel.opponent_answers;
+
+    if (alreadySubmitted) {
+      setNotice("Та энэ 1v1-д аль хэдийн хариулсан байна.");
+      return;
+    }
+
+    setDuelSession({
+      duel,
+      index: 0,
+      answers: [],
+      answer: "",
+      wordStartedAt: Date.now(),
+    });
+  }
+
+  async function submitDuelAnswer(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!duelSession) return;
+
+    const word = duelSession.duel.words[duelSession.index];
+    if (!word) return;
+
+    const nextAnswers: DuelAnswer[] = [
+      ...duelSession.answers,
+      {
+        wordId: word.id,
+        answer: duelSession.answer,
+        timeMs: Date.now() - duelSession.wordStartedAt,
+      },
+    ];
+
+    if (duelSession.index < duelSession.duel.words.length - 1) {
+      setDuelSession({
+        ...duelSession,
+        index: duelSession.index + 1,
+        answers: nextAnswers,
+        answer: "",
+        wordStartedAt: Date.now(),
+      });
+      return;
+    }
+
+    setBusy("duel-submit");
+    try {
+      const submitted = await postJson<DuelChallenge>(
+        `/api/duels/${duelSession.duel.id}/submit`,
+        { answers: nextAnswers }
+      );
+      updateDuelFromServer(submitted);
+      setDuelSession(null);
+      setNotice(
+        submitted.status === "completed"
+          ? "✓ 1v1 дууслаа"
+          : "✓ Хариулт хадгалагдлаа. Нөгөө хэрэглэгчийг хүлээж байна."
+      );
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Алдаа гарлаа");
+    } finally {
+      setBusy("");
     }
   }
 
@@ -4942,7 +5184,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         }
 
         .nav-btn.active {
-          color: #22c55e;
+          color: var(--primary, #22c55e);
         }
 
         .nav-btn.active::after {
@@ -4951,16 +5193,16 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
         .nav-btn.active .nav-btn-icon {
           background: transparent;
-          color: #22c55e;
+          color: var(--primary, #22c55e);
         }
 
         .nav-btn.active {
-          background: #f0fdf4;
+          background: var(--primary-soft, #f0fdf4);
         }
 
         .nav-btn:nth-child(3) {
           transform: none;
-          color: #22c55e;
+          color: var(--primary, #22c55e);
         }
 
         .nav-btn:nth-child(3):active {
@@ -4971,10 +5213,10 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           width: 40px;
           height: 40px;
           border-radius: 50%;
-          background: #22c55e;
+          background: var(--primary, #22c55e);
           color: #ffffff;
           margin-top: 0;
-          box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+          box-shadow: 0 2px 8px var(--primary-soft, rgba(34, 197, 94, 0.3));
         }
 
         .nav-btn:nth-child(3) .nav-btn-icon svg {
@@ -5401,7 +5643,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
         {view === "reader" && authUser && (
           <div style={{ padding: 0 }}>
-            <BookReader />
+            <BookReader onBookWordSaved={handleBookWordSaved} />
           </div>
         )}
 
@@ -5834,6 +6076,165 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
               <div className="form-title">Сорилт</div>
               <div className="form-sub">Найзтайгаа өрсөлдөж үгийн сангаа ахиул</div>
 
+              <div className="challenge-card">
+                <div className="stat-label">1v1 XP бооцоо</div>
+                <div className="challenge-title">Хурдан үгийн тулаан</div>
+                <div className="challenge-host">
+                  Төрлөө сонгоод, секунд бүрт хурдны оноо авна. Ялагч нь бооцооны XP-г авна.
+                </div>
+
+                <form onSubmit={createDuel}>
+                  <div className="form-group">
+                    <select name="opponentId" className="form-input" required defaultValue="">
+                      <option value="">Өрсөлдөгч сонгох</option>
+                      {duelOpponents.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {acceptedFriendIds.includes(user.id) ? "Найз · " : ""}
+                          {user.name} · {user.xp.toLocaleString()} XP
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <select name="categoryId" className="form-input" defaultValue="">
+                      <option value="">Бүх үгийн сан</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div className="form-group">
+                      <input
+                        name="stakeXp"
+                        type="number"
+                        min="10"
+                        max={Math.max(xpTotal, 10)}
+                        className="form-input"
+                        placeholder="100 XP"
+                        defaultValue={Math.min(100, Math.max(xpTotal, 10))}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <select name="timeLimitSeconds" className="form-input" defaultValue="30">
+                        <option value="15">15 секунд</option>
+                        <option value="30">30 секунд</option>
+                        <option value="60">60 секунд</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button type="submit" className="primary-btn" style={{ width: "100%" }} disabled={busy === "duel" || duelOpponents.length === 0}>
+                    {busy === "duel" ? "Илгээж байна..." : "1v1 урилга илгээх"}
+                  </button>
+                </form>
+              </div>
+
+              {duelSession && (
+                <div className="challenge-card success-card">
+                  <div className="stat-label">
+                    {duelSession.index + 1}/{duelSession.duel.words.length} · {duelSession.duel.time_limit_seconds} секунд
+                  </div>
+                  <div className="challenge-title">{duelSession.duel.words[duelSession.index]?.term}</div>
+                  <div className="challenge-host">Монгол утгыг нь аль болох хурдан бичээрэй.</div>
+                  <form onSubmit={submitDuelAnswer}>
+                    <div className="form-group">
+                      <input
+                        className="form-input"
+                        value={duelSession.answer}
+                        onChange={(e) =>
+                          setDuelSession((session) =>
+                            session ? { ...session, answer: e.target.value } : session
+                          )
+                        }
+                        placeholder="Хариулт..."
+                        autoFocus
+                        required
+                      />
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}>
+                      <button type="submit" className="primary-btn" disabled={busy === "duel-submit"}>
+                        {duelSession.index < duelSession.duel.words.length - 1 ? "Дараагийн үг" : "Дуусгах"}
+                      </button>
+                      <button type="button" className="secondary-btn" onClick={() => setDuelSession(null)}>
+                        Болих
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {activeDuels.length > 0 && (
+                <>
+                  <div className="sec-head"><div className="sec-title">1v1 урилга ба тоглолт</div></div>
+                  {activeDuels.map((duel) => {
+                    const isOpponent = duel.opponent_id === authUser.id;
+                    const isChallenger = duel.challenger_id === authUser.id;
+                    const mySubmitted = isChallenger ? duel.challenger_answers : duel.opponent_answers;
+                    const opponentName = isChallenger ? duel.opponent_name : duel.challenger_name;
+                    return (
+                      <div key={duel.id} className="challenge-card">
+                        {duel.category_name && <div className="stat-label">{duel.category_name}</div>}
+                        <div className="challenge-title">{duel.challenger_name} vs {duel.opponent_name}</div>
+                        <div className="challenge-meta">
+                          <div className="challenge-meta-pill">Бооцоо: {duel.stake_xp.toLocaleString()} XP</div>
+                          <div className="challenge-meta-pill">{duel.time_limit_seconds} сек/үг</div>
+                          <div className="challenge-meta-pill">{duel.words.length} үг</div>
+                        </div>
+                        <div className="challenge-host">
+                          {duel.status === "pending"
+                            ? isOpponent
+                              ? `${duel.challenger_name} таныг 1v1-д урьсан байна.`
+                              : `${opponentName} зөвшөөрөхийг хүлээж байна.`
+                            : mySubmitted
+                              ? "Таны хариулт хадгалагдсан. Нөгөө хэрэглэгчийг хүлээж байна."
+                              : "1v1 эхэлсэн. Одоо тоглож болно."}
+                        </div>
+                        <div className="challenge-actions">
+                          {duel.status === "pending" && isOpponent && (
+                            <button className="primary-btn" style={{ width: "100%" }} onClick={() => acceptDuel(duel.id)}>
+                              Зөвшөөрөх
+                            </button>
+                          )}
+                          {duel.status === "active" && !mySubmitted && (
+                            <button className="primary-btn" style={{ width: "100%" }} onClick={() => startDuel(duel)}>
+                              Тоглох
+                            </button>
+                          )}
+                          <button className="secondary-btn" style={{ width: "100%" }} onClick={refreshDuels}>
+                            Шинэчлэх
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <hr className="divider" />
+                </>
+              )}
+
+              {completedDuels.length > 0 && (
+                <>
+                  <div className="sec-head"><div className="sec-title">1v1 үр дүн</div></div>
+                  {completedDuels.map((duel) => (
+                    <div key={duel.id} className="challenge-card">
+                      <div className="challenge-title">{duel.challenger_name} vs {duel.opponent_name}</div>
+                      <div className="challenge-meta">
+                        <div className="challenge-meta-pill">{duel.challenger_score ?? 0} : {duel.opponent_score ?? 0}</div>
+                        <div className="challenge-meta-pill">Бооцоо: {duel.stake_xp.toLocaleString()} XP</div>
+                      </div>
+                      <div className="challenge-host">
+                        {duel.winner_id
+                          ? `Ялагч: ${duel.winner_id === duel.challenger_id ? duel.challenger_name : duel.opponent_name}`
+                          : "Тэнцсэн тул XP шилжээгүй."}
+                      </div>
+                    </div>
+                  ))}
+                  <hr className="divider" />
+                </>
+              )}
+
               {challenges.length > 0 && (
                 <>
                   <div className="sec-head"><div className="sec-title">Идэвхтэй сорилтууд</div></div>
@@ -6039,7 +6440,22 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             <div className="page rank-page">
               <div className="rank-page-head">
                 <div className="form-title">Rank</div>
-                <div className="form-sub">XP, цээжилсэн үг, идэвхтэй байдлаараа байр эзэлнэ.</div>
+                <div className="form-sub">XP эсвэл шалгалтын дундаж хувиар байр эзэлнэ.</div>
+              </div>
+
+              <div className="mode-tabs" style={{ marginBottom: 16 }}>
+                <button
+                  className={`mode-tab${leaderboardSortMode === "xp" ? " active" : ""}`}
+                  onClick={() => setLeaderboardSortMode("xp")}
+                >
+                  XP
+                </button>
+                <button
+                  className={`mode-tab${leaderboardSortMode === "quiz" ? " active" : ""}`}
+                  onClick={() => setLeaderboardSortMode("quiz")}
+                >
+                  Шалгалтын дундаж
+                </button>
               </div>
 
 
@@ -6091,7 +6507,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
               {myRank > 0 && (
                 <>
                   <div className="sec-head"><div className="sec-title">Таны байр</div></div>
-                  {leaderboard.filter((entry) => entry.id === authUser?.id).map((entry) => (
+                  {sortedLeaderboard.filter((entry) => entry.id === authUser?.id).map((entry) => (
                     <div
                       key={entry.id}
                       className={`leader-row rank-self-card leader-self${leaderboardAnimated ? " animated" : ""}`}
@@ -6104,6 +6520,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                         <div className="leader-title">{getTitleLevel(entry.xp).title}</div>
                         <div className="leader-sub">
                           {entry.mastered_words} mastered · {entry.words_count} word{entry.words_count === 1 ? "" : "s"} · {formatLastActive(getUserLastActive(entry.id, entry.last_active_at))}
+                          {` · ${entry.quiz_attempts ?? 0} шалгалт · ${entry.quiz_average ?? 0}% дундаж`}
                         </div>
                       </div>
                       <div className="leader-xp">⭐ {entry.xp.toLocaleString()} XP</div>
@@ -6126,7 +6543,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                         .map((positionIndex) => podiumLeaders[positionIndex] ?? null)
                         .filter((entry): entry is LeaderboardUser => entry !== null)
                         .map((entry) => {
-                          const realRank = leaderboard.findIndex((item) => item.id === entry.id) + 1;
+                          const realRank = sortedLeaderboard.findIndex((item) => item.id === entry.id) + 1;
                           return (
                             <div
                               key={entry.id}
@@ -6148,6 +6565,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                               <div className="podium-xp">⭐ {entry.xp.toLocaleString()} XP</div>
                               <div className="podium-meta">
                                 {entry.mastered_words} mastered · {entry.words_count} word{entry.words_count === 1 ? "" : "s"}
+                                <br />{entry.quiz_attempts ?? 0} шалгалт · {entry.quiz_average ?? 0}% дундаж
                               </div>
                               <div className="podium-step">#{realRank}</div>
 
@@ -6186,7 +6604,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                   {leaderboard.length > 0 && (
                     <div className="leader-list-card">
                       <div className="leaderboard-stack">
-                        {leaderboard.map((entry, index) => {
+                        {sortedLeaderboard.map((entry, index) => {
                           const liked = leaderboardLikes[entry.id] ?? false;
                           const unread = unreadChatCount(entry.id);
                           return (
@@ -6203,6 +6621,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                                 <div className="leader-title">{getTitleLevel(entry.xp).title}</div>
                                 <div className="leader-sub">
                                   {entry.mastered_words} mastered · {entry.words_count} word{entry.words_count === 1 ? "" : "s"} · {formatLastActive(getUserLastActive(entry.id, entry.last_active_at))}
+                                  {` · ${entry.quiz_attempts ?? 0} шалгалт · ${entry.quiz_average ?? 0}% дундаж`}
                                 </div>
                               </div>
                               <div className="leader-actions" style={{ display: "flex", alignItems: "center", gap: 8 }} onClick={(e) => e.stopPropagation()}>

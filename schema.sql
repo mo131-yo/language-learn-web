@@ -41,6 +41,68 @@ create table if not exists challenge_members (
   unique(challenge_id, display_name)
 );
 
+create table if not exists users (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  email text,
+  password_hash text not null,
+  avatar text,
+  bio text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists user_xp_ledger (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  amount integer not null,
+  reason text not null,
+  source_type text not null default 'manual',
+  source_id uuid,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists user_xp_ledger_user_idx on user_xp_ledger(user_id);
+create unique index if not exists user_xp_ledger_source_unique_idx
+  on user_xp_ledger(user_id, source_type, source_id)
+  where source_id is not null;
+
+create table if not exists quiz_attempts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  category_id uuid references categories(id) on delete set null,
+  score integer not null,
+  correct_count integer not null,
+  total_count integer not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists quiz_attempts_user_idx on quiz_attempts(user_id);
+create index if not exists quiz_attempts_category_idx on quiz_attempts(category_id);
+
+create table if not exists duel_challenges (
+  id uuid primary key default gen_random_uuid(),
+  challenger_id uuid not null references users(id) on delete cascade,
+  opponent_id uuid not null references users(id) on delete cascade,
+  category_id uuid references categories(id) on delete set null,
+  stake_xp integer not null,
+  time_limit_seconds integer not null default 30,
+  words jsonb not null default '[]'::jsonb,
+  challenger_answers jsonb,
+  opponent_answers jsonb,
+  challenger_score integer,
+  opponent_score integer,
+  winner_id uuid references users(id) on delete set null,
+  status text not null default 'pending',
+  settled_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists duel_challenges_challenger_idx on duel_challenges(challenger_id);
+create index if not exists duel_challenges_opponent_idx on duel_challenges(opponent_id);
+create index if not exists duel_challenges_status_idx on duel_challenges(status);
+
 create table if not exists push_subscriptions (
   id uuid primary key default gen_random_uuid(),
   member_name text not null,
