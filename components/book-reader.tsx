@@ -1,5 +1,6 @@
 "use client";
 
+import { parseBookFile } from "@/lib/parseBook";
 import { WordData } from "@/lib/push";
 import Link from "next/link";
 import { AuthModal } from "./AuthModal";
@@ -128,6 +129,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
   const [wordData, setWordData] = useState<WordData | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [importingBook, setImportingBook] = useState(false);
   const [apiError, setApiError] = useState("");
   const [highlightedWord, setHighlightedWord] = useState("");
   const [fromCache, setFromCache] = useState(false);
@@ -242,7 +244,7 @@ export default function BookReader({ bookId }: { bookId?: string }) {
     }
   }
 
-  function handleBookUpload(event: ChangeEvent<HTMLInputElement>) {
+  async function handleBookUpload(event: ChangeEvent<HTMLInputElement>) {
     if (!readerAuthUser) {
       event.target.value = "";
       setLoadError("Ном import хийж уншихын тулд эхлээд бүртгүүлнэ үү.");
@@ -253,18 +255,11 @@ export default function BookReader({ bookId }: { bookId?: string }) {
 
     if (!file) return;
 
-    const allowedTypes = ["text/plain", "application/octet-stream"];
-    const isTxtFile = file.name.toLowerCase().endsWith(".txt");
+    setLoadError("");
+    setImportingBook(true);
 
-    if (!isTxtFile && !allowedTypes.includes(file.type)) {
-      setLoadError("Одоогоор зөвхөн .txt ном оруулна.");
-      return;
-    }
-
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      const text = String(reader.result || "");
+    try {
+      const text = await parseBookFile(file);
 
       if (!text.trim()) {
         setLoadError("Файл хоосон байна.");
@@ -288,13 +283,11 @@ export default function BookReader({ bookId }: { bookId?: string }) {
       );
       localStorage.setItem("selected-imported-book", JSON.stringify(importedBook));
       void saveUserState("last-imported-book", importedBook);
-    };
-
-    reader.onerror = () => {
-      setLoadError("Ном унших үед алдаа гарлаа.");
-    };
-
-    reader.readAsText(file);
+    } catch {
+      setLoadError("Файл уншихад алдаа гарлаа. Өөр файл оруулна уу.");
+    } finally {
+      setImportingBook(false);
+    }
   }
 
   function loadLastImportedBook() {
@@ -1726,10 +1719,10 @@ export default function BookReader({ bookId }: { bookId?: string }) {
             )}
 
             <label className="br-vocab-btn">
-              Ном import
+              {importingBook ? "Уншиж байна..." : "Ном import"}
               <input
                 type="file"
-                accept=".txt,text/plain"
+                accept=".txt,.pdf,.epub,.docx"
                 onChange={handleBookUpload}
                 style={{ display: "none" }}
               />
@@ -1835,10 +1828,10 @@ export default function BookReader({ bookId }: { bookId?: string }) {
               {!bookId && (
                 <div className="empty-book-actions">
                   <label className="import-main-btn">
-                    .txt ном сонгох
+                    {importingBook ? "Уншиж байна..." : "Ном сонгох"}
                     <input
                       type="file"
-                      accept=".txt,text/plain"
+                      accept=".txt,.pdf,.epub,.docx"
                       onChange={handleBookUpload}
                       style={{ display: "none" }}
                     />

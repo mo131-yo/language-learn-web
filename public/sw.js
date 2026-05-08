@@ -5,7 +5,8 @@ self.addEventListener("push", (event) => {
     body: data.body || "Ugee tseejleerei!",
     icon: "/favicon.svg",
     badge: "/favicon.svg",
-    data: { url: data.url || "/" }
+    tag: data.tag || "vocab-reminder",
+    data: { url: data.url || "/?view=learn" }
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -13,6 +14,21 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || "/";
-  event.waitUntil(clients.openWindow(url));
+  const url = new URL(event.notification.data?.url || "/?view=learn", self.location.origin).href;
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client && new URL(client.url).origin === self.location.origin) {
+          if ("navigate" in client) {
+            return client.navigate(url).then((focusedClient) => focusedClient?.focus());
+          }
+
+          return client.focus();
+        }
+      }
+
+      return clients.openWindow(url);
+    })
+  );
 });

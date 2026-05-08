@@ -19,14 +19,33 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ error: "Mastery must be between 0 and 5." }, { status: 400 });
     }
 
+    const sessionUser = await getSessionUser();
+
+    if (!sessionUser) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+
     const word = await queryOne<Word>(
-      `with updated as (
-         update words set mastery = $1 where id = $2 returning *
+      `with existing_word as (
+         select * from words where id = $2
+       ),
+       upserted_mastery as (
+         insert into user_word_mastery (user_id, word_id, mastery, updated_at)
+         select $3, id, $1, now()
+         from existing_word
+         on conflict (user_id, word_id)
+         do update set mastery = excluded.mastery, updated_at = now()
+         returning word_id, mastery
        )
-       select updated.*, c.name as category_name, c.color as category_color
-       from updated
-       left join categories c on c.id = updated.category_id`,
-      [parsed.data.mastery, id]
+       select
+         existing_word.*,
+         upserted_mastery.mastery::int as mastery,
+         c.name as category_name,
+         c.color as category_color
+       from existing_word
+       join upserted_mastery on upserted_mastery.word_id = existing_word.id
+       left join categories c on c.id = existing_word.category_id`,
+      [parsed.data.mastery, id, sessionUser.userId]
     );
 
     if (!word) {
