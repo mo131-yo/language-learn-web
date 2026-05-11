@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, CSSProperties, useEffect, useRef, useState } from "react";
 import { parseBookFile } from "@/lib/parseBook";
 
 type Book = {
@@ -24,6 +24,161 @@ type ImportedBook = {
 type UserStateResponse = {
   state: Record<string, unknown> | null;
 };
+
+function isImportedBook(value: unknown): value is ImportedBook {
+  if (!value || typeof value !== "object") return false;
+
+  const book = value as Partial<ImportedBook>;
+  return (
+    typeof book.id === "string" &&
+    typeof book.name === "string" &&
+    typeof book.text === "string" &&
+    typeof book.importedAt === "number"
+  );
+}
+
+function getImportedBooks(value: unknown) {
+  return Array.isArray(value) ? value.filter(isImportedBook) : [];
+}
+
+function getDisplayBookName(name: string) {
+  return (
+    name
+      .replace(/\.(txt|pdf|epub|docx)$/i, "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "Imported book"
+  );
+}
+
+function getBookWordCount(text: string) {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+function getBookCoverTheme(seed: string) {
+  const palettes = [
+    ["#31513f", "#83a05f", "#f7d99b"],
+    ["#6d2f2f", "#c86f4a", "#ffe0b5"],
+    ["#253957", "#5b7cb2", "#d9e7ff"],
+    ["#4f3a67", "#9b7cc0", "#f4dcff"],
+    ["#2d5a5a", "#56a4a0", "#d6fff6"],
+    ["#5a432b", "#b07a3f", "#ffe2ab"],
+    ["#223b2f", "#2f7d54", "#d8f3dc"],
+    ["#5b3148", "#d0799f", "#ffe0ee"],
+  ];
+
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  }
+
+  const palette = palettes[hash % palettes.length];
+  const pattern = hash % 4;
+
+  return {
+    "--cover-start": palette[0],
+    "--cover-end": palette[1],
+    "--cover-accent": palette[2],
+    "--cover-pattern": String(pattern),
+  } as CSSProperties;
+}
+
+function getImportedBookProgress() {
+  return 0;
+}
+
+function BookProgress({ progress }: { progress: number }) {
+  const safeProgress = Math.min(100, Math.max(0, Math.round(progress)));
+
+  return (
+    <div className="shelf-progress" aria-label={`Уншсан явц ${safeProgress}%`}>
+      <div className="shelf-progress-top">
+        <span>Уншсан</span>
+        <strong>{safeProgress}%</strong>
+      </div>
+      <div className="shelf-progress-track">
+        <div
+          className="shelf-progress-fill"
+          style={{ width: `${safeProgress}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ImportedBookCover({ book }: { book: ImportedBook }) {
+  const title = getDisplayBookName(book.name);
+  const themeStyle = getBookCoverTheme(`${book.id}-${title}`);
+  const titleParts = title.split(/\s+/).filter(Boolean).slice(0, 4);
+
+  return (
+    <div className="generated-book-cover" style={themeStyle}>
+      <div className="cover-shine" />
+      <div className="cover-spine" />
+      <div className="cover-mark">{title.charAt(0).toUpperCase()}</div>
+      <div className="cover-title">{titleParts.join(" ") || title}</div>
+      <div className="cover-author">Тодорхойгүй зохиогч</div>
+    </div>
+  );
+}
+
+function AddBookCard({
+  importingBook,
+  onClick,
+}: {
+  importingBook: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="shelf-book-card add-book-card"
+      onClick={onClick}
+      disabled={importingBook}
+    >
+      <div className="add-book-cover">
+        <span className="add-book-plus">＋</span>
+        <span className="add-book-label">Ном нэмэх</span>
+        <span className="add-book-sub">PDF, EPUB, TXT</span>
+      </div>
+      <div className="shelf-book-info">
+        <h3 className="shelf-book-title">
+          {importingBook ? "Уншиж байна..." : "Ном нэмэх"}
+        </h3>
+        <p className="shelf-book-author">Файлаас import хийх</p>
+      </div>
+    </button>
+  );
+}
+
+function ImportedBookCard({
+  book,
+  onOpen,
+}: {
+  book: ImportedBook;
+  onOpen: (book: ImportedBook) => void;
+}) {
+  const title = getDisplayBookName(book.name);
+  const progress = getImportedBookProgress();
+
+  return (
+    <button
+      type="button"
+      className="shelf-book-card"
+      onClick={() => onOpen(book)}
+    >
+      <ImportedBookCover book={book} />
+      <div className="shelf-book-info">
+        <h3 className="shelf-book-title">{title}</h3>
+        <p className="shelf-book-author">Тодорхойгүй зохиогч</p>
+        <BookProgress progress={progress} />
+        <p className="shelf-book-meta">
+          {getBookWordCount(book.text).toLocaleString()} үг
+        </p>
+      </div>
+    </button>
+  );
+}
 
 const TOPICS = [
   { label: "All", value: "all", icon: "✦" },
@@ -201,7 +356,7 @@ export default function BookLibrary({
       const data = await res.json();
 
       setBooks((prev) => {
-        const incoming: Book[] = data.books || [];
+        const incoming: Book[] = Array.isArray(data.books) ? data.books : [];
 
         if (!append) {
           return incoming;
@@ -238,7 +393,7 @@ export default function BookLibrary({
     try {
       const raw = localStorage.getItem("imported-books");
       if (raw) {
-        setImportedBooks(JSON.parse(raw) as ImportedBook[]);
+        setImportedBooks(getImportedBooks(JSON.parse(raw)));
       }
     } catch {
       // ignore
@@ -252,9 +407,11 @@ export default function BookLibrary({
       .then((data) => {
         const imported = data?.state?.["imported-books"];
 
-        if (Array.isArray(imported)) {
-          setImportedBooks(imported as ImportedBook[]);
-          localStorage.setItem("imported-books", JSON.stringify(imported));
+        const safeImportedBooks = getImportedBooks(imported);
+
+        if (safeImportedBooks.length > 0 || Array.isArray(imported)) {
+          setImportedBooks(safeImportedBooks);
+          localStorage.setItem("imported-books", JSON.stringify(safeImportedBooks));
         }
       })
       .catch(() => {
@@ -320,6 +477,8 @@ export default function BookLibrary({
 
   const currentTopicLabel =
     TOPICS.find((item) => item.value === topic)?.label || "Books";
+  const continueBook = importedBooks[0] ?? null;
+  const hasDiscoveryResults = books.length > 0 && !loading && !error;
 
   return (
     <>
@@ -1399,6 +1558,787 @@ export default function BookLibrary({
             grid-template-columns: 1fr;
           }
         }
+
+        .lib-root {
+          color: var(--ds-ink, #1f261f);
+          font-family: var(--ds-font-sans, 'DM Sans', system-ui, sans-serif);
+        }
+
+        .lib-hero-inner {
+          position: relative;
+          display: grid;
+          gap: 18px;
+          padding: clamp(20px, 5vw, 34px);
+          border: 1px solid var(--ds-line, rgba(49, 60, 47, 0.14));
+          border-radius: var(--ds-radius-xl, 28px);
+          background:
+            linear-gradient(115deg, rgba(255,255,255,0.92), rgba(255,248,234,0.86)),
+            radial-gradient(circle at 88% 12%, rgba(22, 163, 74, 0.12), transparent 30%);
+          box-shadow: var(--ds-shadow-md, 0 10px 30px rgba(31, 38, 31, 0.08));
+        }
+
+        .lib-eyebrow {
+          width: fit-content;
+          margin-bottom: 10px;
+          border-color: rgba(22, 163, 74, 0.18);
+          background: var(--ds-primary-soft, #e8f7ed);
+          color: var(--ds-primary-hover, #15803d);
+          letter-spacing: 0.08em;
+        }
+
+        .lib-headline {
+          max-width: 680px;
+          color: var(--ds-ink, #1f261f);
+          font-size: clamp(2rem, 9vw, 3.6rem);
+          line-height: 1.04;
+          letter-spacing: -0.035em;
+        }
+
+        .lib-headline em {
+          color: var(--ds-primary, #16a34a);
+        }
+
+        .lib-subline {
+          max-width: 620px;
+          color: var(--ds-ink-soft, #596457);
+          font-size: clamp(0.92rem, 2vw, 1.02rem);
+          font-weight: 650;
+          line-height: 1.65;
+        }
+
+        .lib-search-form {
+          max-width: 760px;
+        }
+
+        .lib-search-wrap {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr) auto;
+          gap: 8px;
+          min-height: 56px;
+          border: 1px solid var(--ds-line, rgba(49, 60, 47, 0.14));
+          border-radius: 18px;
+          background: var(--ds-surface-raised, #fff);
+          box-shadow: var(--ds-shadow-sm, 0 1px 2px rgba(31, 38, 31, 0.06));
+        }
+
+        .lib-search-wrap:focus-within {
+          border-color: color-mix(in srgb, var(--ds-primary, #16a34a) 42%, var(--ds-line, #d7ddd3));
+          box-shadow: 0 0 0 4px var(--ds-focus, rgba(22, 163, 74, 0.28));
+        }
+
+        .lib-search-input {
+          color: var(--ds-ink, #1f261f);
+          font-family: var(--ds-font-sans, 'DM Sans', system-ui, sans-serif);
+          font-weight: 750;
+        }
+
+        .lib-search-btn,
+        .import-book-btn,
+        .lib-load-more-btn {
+          border-radius: 14px;
+          background: var(--ds-primary, #16a34a);
+          color: #fff;
+          box-shadow: var(--ds-shadow-sm, 0 1px 2px rgba(31, 38, 31, 0.06));
+        }
+
+        .lib-search-btn:hover,
+        .import-book-btn:hover,
+        .lib-load-more-btn:hover:not(:disabled) {
+          background: var(--ds-primary-hover, #15803d);
+          transform: translateY(-1px);
+        }
+
+        .lib-quick {
+          padding-top: 4px;
+        }
+
+        .lib-quick-btn,
+        .lib-filter-btn,
+        .lib-more-top-btn {
+          border-color: var(--ds-line, rgba(49, 60, 47, 0.14));
+          background: color-mix(in srgb, var(--ds-surface-raised, #fff) 90%, transparent);
+          color: var(--ds-ink-soft, #596457);
+          box-shadow: none;
+        }
+
+        .lib-filter-btn.active {
+          border-color: rgba(22, 163, 74, 0.28);
+          background: var(--ds-primary-soft, #e8f7ed);
+          color: var(--ds-primary-hover, #15803d);
+          box-shadow: none;
+        }
+
+        .lib-body {
+          display: grid;
+          gap: 24px;
+          padding: 22px 0 34px;
+        }
+
+        .continue-band,
+        .my-books-band,
+        .discovery-band {
+          border: 1px solid var(--ds-line, rgba(49, 60, 47, 0.14));
+          border-radius: var(--ds-radius-xl, 28px);
+          background: color-mix(in srgb, var(--ds-surface, #fffdf7) 94%, transparent);
+          box-shadow: var(--ds-shadow-sm, 0 1px 2px rgba(31, 38, 31, 0.06));
+        }
+
+        .continue-band {
+          display: grid;
+          gap: 14px;
+          padding: 18px;
+          background:
+            linear-gradient(135deg, rgba(255,248,234,0.92), rgba(232,247,237,0.82)),
+            var(--ds-paper, #fff8ea);
+        }
+
+        .continue-card {
+          display: grid;
+          grid-template-columns: 52px minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 14px;
+        }
+
+        .continue-cover {
+          width: 52px;
+          height: 68px;
+          display: grid;
+          place-items: center;
+          border-radius: 10px;
+          background: linear-gradient(145deg, #2f5f43, #d88a2d);
+          color: #fff;
+          font-size: 1.35rem;
+          box-shadow: inset -8px 0 14px rgba(0,0,0,0.16);
+        }
+
+        .continue-label,
+        .library-label {
+          color: var(--ds-primary-hover, #15803d);
+          font-size: 0.72rem;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
+        .continue-title {
+          margin-top: 3px;
+          color: var(--ds-ink, #1f261f);
+          font-size: 1.02rem;
+          font-weight: 900;
+          line-height: 1.25;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .continue-meta {
+          margin-top: 4px;
+          color: var(--ds-ink-soft, #596457);
+          font-size: 0.82rem;
+          font-weight: 650;
+        }
+
+        .continue-action {
+          width: auto;
+          padding: 10px 14px;
+          border: 0;
+          border-radius: 999px;
+          background: var(--ds-primary, #16a34a);
+          color: #fff;
+          font-weight: 900;
+          white-space: nowrap;
+        }
+
+        .my-books-band {
+          margin-bottom: 0;
+          padding: clamp(18px, 4vw, 24px);
+          background: var(--ds-surface, #fffdf7);
+        }
+
+        .my-books-head {
+          align-items: flex-start;
+        }
+
+        .my-books-title,
+        .lib-section-title {
+          color: var(--ds-ink, #1f261f);
+          font-family: var(--ds-font-sans, 'DM Sans', system-ui, sans-serif);
+          font-size: clamp(1.25rem, 5vw, 1.75rem);
+          letter-spacing: -0.02em;
+        }
+
+        .my-books-sub,
+        .lib-section-count,
+        .book-card-author,
+        .my-book-meta,
+        .lib-empty-text {
+          color: var(--ds-ink-soft, #596457);
+        }
+
+        .my-books-row {
+          grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+          gap: 12px;
+        }
+
+        .my-book-card {
+          min-height: 150px;
+          border: 1px solid var(--ds-line, rgba(49, 60, 47, 0.14));
+          border-radius: 18px;
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,248,234,0.72)),
+            var(--ds-surface-raised, #fff);
+          color: var(--ds-ink, #1f261f);
+          box-shadow: none;
+        }
+
+        .my-book-icon {
+          width: 38px;
+          height: 48px;
+          margin-bottom: 14px;
+          border-radius: 9px;
+          background: linear-gradient(145deg, #2f5f43, #d88a2d);
+          box-shadow: inset -7px 0 12px rgba(0,0,0,0.15);
+        }
+
+        .my-book-name,
+        .book-card-title,
+        .lib-empty-title {
+          color: var(--ds-ink, #1f261f);
+        }
+
+        .discovery-band {
+          padding: clamp(18px, 4vw, 24px);
+        }
+
+        .lib-section-head {
+          margin-bottom: 18px;
+        }
+
+        .lib-filters {
+          margin-bottom: 0;
+          padding: 0 0 4px;
+        }
+
+        .lib-grid {
+          grid-template-columns: repeat(auto-fill, minmax(154px, 1fr));
+          gap: 14px;
+        }
+
+        .book-card {
+          padding: 10px;
+          border: 1px solid var(--ds-line, rgba(49, 60, 47, 0.14));
+          border-radius: 18px;
+          background: var(--ds-surface-raised, #fff);
+          box-shadow: none;
+        }
+
+        .book-card:hover,
+        .my-book-card:hover {
+          border-color: rgba(22, 163, 74, 0.3);
+          box-shadow: var(--ds-shadow-md, 0 10px 30px rgba(31, 38, 31, 0.08));
+        }
+
+        .book-card-cover-wrap {
+          border-radius: 12px;
+          background:
+            linear-gradient(145deg, rgba(232,247,237,0.9), rgba(255,241,220,0.82));
+        }
+
+        .book-card-title {
+          font-family: var(--ds-font-sans, 'DM Sans', system-ui, sans-serif);
+          font-size: 0.96rem;
+          line-height: 1.28;
+        }
+
+        .book-card-badge,
+        .book-card-reads {
+          background: var(--ds-primary-soft, #e8f7ed);
+          color: var(--ds-primary-hover, #15803d);
+          border-color: rgba(22, 163, 74, 0.14);
+        }
+
+        .book-card-cta {
+          background: var(--ds-surface-raised, #fff);
+          color: var(--ds-primary-hover, #15803d);
+        }
+
+        .lib-empty,
+        .my-books-empty,
+        .lib-error {
+          border-radius: 18px;
+        }
+
+        .lib-empty {
+          padding: 44px 18px;
+          border-color: var(--ds-line, rgba(49, 60, 47, 0.14));
+          background: var(--ds-surface, #fffdf7);
+        }
+
+        .my-books-band {
+          overflow: hidden;
+          border-color: rgba(115, 75, 35, 0.2);
+          background:
+            radial-gradient(circle at 12% 0%, rgba(255, 224, 166, 0.36), transparent 18rem),
+            linear-gradient(180deg, #fff7e7 0%, #f5e5cc 100%);
+        }
+
+        .bookshelf {
+          margin-top: 18px;
+          display: grid;
+          gap: 22px;
+        }
+
+        .bookshelf-row {
+          position: relative;
+          padding: 22px clamp(14px, 3vw, 26px) 30px;
+          border: 1px solid rgba(113, 72, 32, 0.24);
+          border-radius: 26px;
+          background:
+            radial-gradient(circle at 20% 0%, rgba(255, 231, 181, 0.36), transparent 20rem),
+            linear-gradient(180deg, rgba(144, 88, 42, 0.88), rgba(104, 61, 29, 0.94)),
+            repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 1px, transparent 1px 18px);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 241, 210, 0.32),
+            inset 0 -18px 28px rgba(42, 22, 8, 0.18),
+            0 22px 45px rgba(83, 50, 22, 0.18);
+        }
+
+        .bookshelf-row::after {
+          content: "";
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          height: 28px;
+          border-radius: 0 0 25px 25px;
+          background:
+            linear-gradient(180deg, rgba(255, 217, 151, 0.22), transparent 38%),
+            linear-gradient(90deg, #5f3519, #9b6030 18%, #6f3d1b 52%, #b36f37 78%, #5d3218);
+          box-shadow:
+            inset 0 3px 0 rgba(255,255,255,0.1),
+            0 -10px 20px rgba(47, 25, 10, 0.22);
+        }
+
+        .bookshelf-grid {
+          position: relative;
+          z-index: 1;
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+          gap: clamp(14px, 2.8vw, 24px);
+          align-items: end;
+        }
+
+        .shelf-book-card {
+          display: grid;
+          gap: 10px;
+          min-width: 0;
+          padding: 0;
+          border: 0;
+          background: transparent;
+          color: #24160b;
+          text-align: left;
+          cursor: pointer;
+        }
+
+        .shelf-book-card:hover .generated-book-cover,
+        .shelf-book-card:hover .add-book-cover {
+          transform: translateY(-5px) rotate(-1deg);
+          box-shadow:
+            12px 18px 24px rgba(40, 20, 8, 0.32),
+            inset 8px 0 18px rgba(255,255,255,0.12),
+            inset -12px 0 18px rgba(0,0,0,0.16);
+        }
+
+        .generated-book-cover,
+        .add-book-cover {
+          position: relative;
+          aspect-ratio: 2 / 3;
+          width: 100%;
+          max-width: 156px;
+          margin-inline: auto;
+          overflow: hidden;
+          border-radius: 8px 12px 12px 8px;
+          box-shadow:
+            10px 14px 20px rgba(40, 20, 8, 0.28),
+            inset 8px 0 16px rgba(255,255,255,0.12),
+            inset -12px 0 18px rgba(0,0,0,0.16);
+          transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .generated-book-cover {
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          padding: 16px 14px 14px 20px;
+          background:
+            radial-gradient(circle at 78% 18%, color-mix(in srgb, var(--cover-accent) 35%, transparent), transparent 34%),
+            linear-gradient(145deg, var(--cover-start), var(--cover-end));
+          color: #fff9ee;
+        }
+
+        .cover-shine {
+          position: absolute;
+          inset: 0;
+          background:
+            linear-gradient(110deg, rgba(255,255,255,0.22), transparent 28%, transparent 70%, rgba(255,255,255,0.08));
+          pointer-events: none;
+        }
+
+        .cover-spine {
+          position: absolute;
+          inset: 0 auto 0 0;
+          width: 15px;
+          background:
+            linear-gradient(90deg, rgba(0,0,0,0.3), rgba(255,255,255,0.1), transparent);
+        }
+
+        .cover-mark {
+          width: 36px;
+          height: 36px;
+          display: grid;
+          place-items: center;
+          border: 1px solid rgba(255,255,255,0.34);
+          border-radius: 50%;
+          background: rgba(255,255,255,0.14);
+          color: var(--cover-accent);
+          font-family: 'Playfair Display', Georgia, serif;
+          font-size: 1.25rem;
+          font-weight: 900;
+        }
+
+        .cover-title {
+          position: relative;
+          z-index: 1;
+          display: -webkit-box;
+          overflow: hidden;
+          color: #fff9ee;
+          font-family: 'Playfair Display', Georgia, serif;
+          font-size: clamp(1rem, 4.3vw, 1.35rem);
+          font-weight: 900;
+          line-height: 1.08;
+          letter-spacing: -0.02em;
+          text-shadow: 0 2px 10px rgba(0,0,0,0.22);
+          -webkit-line-clamp: 4;
+          -webkit-box-orient: vertical;
+        }
+
+        .cover-author {
+          position: relative;
+          z-index: 1;
+          overflow: hidden;
+          color: rgba(255,249,238,0.78);
+          font-size: 0.66rem;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .add-book-cover {
+          display: grid;
+          place-items: center;
+          align-content: center;
+          gap: 6px;
+          border: 2px dashed rgba(255, 249, 238, 0.64);
+          background:
+            linear-gradient(145deg, rgba(255,249,238,0.24), rgba(255,249,238,0.08)),
+            rgba(74, 42, 18, 0.58);
+          color: #fff9ee;
+        }
+
+        .add-book-plus {
+          width: 46px;
+          height: 46px;
+          display: grid;
+          place-items: center;
+          border-radius: 50%;
+          background: rgba(255,255,255,0.18);
+          color: #dcfce7;
+          font-size: 2rem;
+          line-height: 1;
+        }
+
+        .add-book-label {
+          font-size: 0.92rem;
+          font-weight: 950;
+        }
+
+        .add-book-sub {
+          color: rgba(255,249,238,0.7);
+          font-size: 0.68rem;
+          font-weight: 800;
+        }
+
+        .shelf-book-info {
+          min-width: 0;
+          padding: 0 4px;
+          text-align: center;
+        }
+
+        .shelf-book-title {
+          display: -webkit-box;
+          min-height: 2.42em;
+          overflow: hidden;
+          color: #2b1b0d;
+          font-size: 0.9rem;
+          font-weight: 950;
+          line-height: 1.2;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+        }
+
+        .shelf-book-author {
+          overflow: hidden;
+          margin-top: 3px;
+          color: rgba(43, 27, 13, 0.62);
+          font-size: 0.72rem;
+          font-weight: 800;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .shelf-book-meta {
+          margin-top: 6px;
+          color: rgba(43, 27, 13, 0.56);
+          font-size: 0.68rem;
+          font-weight: 800;
+        }
+
+        .shelf-progress {
+          margin-top: 8px;
+        }
+
+        .shelf-progress-top {
+          display: flex;
+          justify-content: space-between;
+          gap: 8px;
+          color: rgba(43, 27, 13, 0.62);
+          font-size: 0.65rem;
+          font-weight: 900;
+        }
+
+        .shelf-progress-track {
+          height: 5px;
+          overflow: hidden;
+          margin-top: 4px;
+          border-radius: 999px;
+          background: rgba(43, 27, 13, 0.14);
+        }
+
+        .shelf-progress-fill {
+          height: 100%;
+          border-radius: inherit;
+          background: linear-gradient(90deg, #15803d, #22c55e);
+        }
+
+        @media (min-width: 820px) {
+          .bookshelf-grid {
+            grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+          }
+        }
+
+        @media (max-width: 620px) {
+          .lib-root {
+            width: 100%;
+            max-width: 100%;
+            overflow-x: hidden;
+          }
+
+          .lib-body {
+            gap: 18px;
+            padding-bottom: calc(36px + env(safe-area-inset-bottom));
+          }
+
+          .lib-hero-inner {
+            padding: 18px;
+            border-radius: 22px;
+          }
+
+          .lib-search-wrap {
+            grid-template-columns: auto minmax(0, 1fr);
+          }
+
+          .lib-search-btn {
+            grid-column: 1 / -1;
+            width: 100%;
+          }
+
+          .bookshelf-row {
+            padding: 18px 12px 28px;
+            border-radius: 20px;
+          }
+
+          .bookshelf-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px 12px;
+          }
+
+          .generated-book-cover,
+          .add-book-cover {
+            width: 100%;
+            max-width: 128px;
+          }
+
+          .continue-card {
+            grid-template-columns: 46px minmax(0, 1fr);
+          }
+
+          .continue-action {
+            grid-column: 1 / -1;
+            width: 100%;
+          }
+
+          .my-books-row,
+          .lib-grid {
+            grid-template-columns: 1fr;
+            gap: 12px;
+          }
+
+          .my-book-card,
+          .book-card {
+            width: 100%;
+          }
+
+          .lib-filters {
+            display: flex;
+            gap: 8px;
+            max-width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 0 1px 8px;
+            white-space: nowrap;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+          }
+
+          .lib-filters::-webkit-scrollbar {
+            display: none;
+          }
+
+          .lib-filter-btn {
+            flex: 0 0 auto;
+            white-space: nowrap;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .lib-hero-inner,
+          .continue-band,
+          .my-books-band,
+          .discovery-band {
+            border-radius: 20px;
+          }
+
+          .my-books-row,
+          .lib-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        .lib-root,
+        .lib-hero,
+        .lib-hero-inner,
+        .lib-body,
+        .continue-band,
+        .my-books-band,
+        .discovery-band,
+        .bookshelf,
+        .bookshelf-row,
+        .bookshelf-grid {
+          min-width: 0;
+          max-width: 100%;
+        }
+
+        .lib-root,
+        .bookshelf,
+        .bookshelf-row,
+        .bookshelf-grid {
+          width: 100%;
+        }
+
+        .bookshelf-grid {
+          grid-template-columns: repeat(auto-fit, minmax(min(132px, 100%), 1fr));
+        }
+
+        .shelf-book-card {
+          width: 100%;
+          max-width: 100%;
+          justify-items: center;
+        }
+
+        .generated-book-cover,
+        .add-book-cover {
+          inline-size: 100%;
+          block-size: auto;
+        }
+
+        @media (max-width: 620px) {
+          .lib-root {
+            overflow-x: hidden;
+          }
+
+          .lib-hero,
+          .lib-body {
+            width: 100%;
+            max-width: 100%;
+          }
+
+          .lib-body {
+            padding-inline: 0;
+          }
+
+          .continue-band,
+          .my-books-band,
+          .discovery-band {
+            width: 100%;
+            max-width: 100%;
+            overflow: hidden;
+          }
+
+          .my-books-band {
+            padding-inline: 12px;
+          }
+
+          .bookshelf {
+            margin-inline: 0;
+            overflow-x: hidden;
+          }
+
+          .bookshelf-row {
+            padding: 14px 10px 26px;
+            overflow: hidden;
+          }
+
+          .bookshelf-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px 10px;
+          }
+
+          .generated-book-cover,
+          .add-book-cover {
+            max-width: min(118px, 42vw);
+          }
+
+          .cover-title {
+            font-size: clamp(0.9rem, 4vw, 1.08rem);
+          }
+
+          .shelf-book-title {
+            font-size: 0.8rem;
+          }
+        }
+
+        @media (max-width: 360px) {
+          .bookshelf-grid {
+            gap: 12px 8px;
+          }
+
+          .generated-book-cover,
+          .add-book-cover {
+            max-width: min(106px, 42vw);
+          }
+        }
       `}</style>
 
       <div className="lib-root">
@@ -1408,16 +2348,17 @@ export default function BookLibrary({
 
           <div className="lib-hero-inner">
             <div>
-              <div className="lib-eyebrow">Номын сан · AI Vocabulary Reader</div>
+              <div className="lib-eyebrow">Унших булан · Англи номын сан</div>
 
               <h1 className="lib-headline">
-                Номоо сонгоод
-                <em> уншаарай</em>
+                Өнөөдөр унших
+                <em> номоо сонгоё</em>
               </h1>
 
               <p className="lib-subline">
-                Сонгодог ном унших эсвэл өөрийн .txt номоо import хийгээд
-                үгэн дээр дарж тайлбар, орчуулгаа хараарай.
+                Project Gutenberg-ийн англи сонгодог номоос хайж унших эсвэл
+                өөрийн PDF, EPUB, DOCX, TXT номоо import хийгээд үгэн дээр дарж
+                орчуулга, тайлбар авна.
               </p>
             </div>
 
@@ -1430,9 +2371,13 @@ export default function BookLibrary({
                   type="text"
                   value={search ?? ""}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Номын нэр эсвэл зохиолчоор хайх..."
+                  placeholder="Номын нэр, зохиолч эсвэл сэдвээр хайх"
                   autoComplete="off"
                 />
+
+                <button type="submit" className="lib-search-btn">
+                  Хайх
+                </button>
               </div>
             </form>
 
@@ -1452,12 +2397,65 @@ export default function BookLibrary({
         </section>
 
         <div className="lib-body">
+          <section className="continue-band">
+            {continueBook ? (
+              <div className="continue-card">
+                <div className="continue-cover">📖</div>
+
+                <div style={{ minWidth: 0 }}>
+                  <div className="continue-label">Үргэлжлүүлэн унших</div>
+                  <div className="continue-title">
+                    {getDisplayBookName(continueBook.name)}
+                  </div>
+                  <div className="continue-meta">
+                    {new Date(continueBook.importedAt).toLocaleDateString()} ·{" "}
+                    {continueBook.text
+                      .split(/\s+/)
+                      .filter(Boolean)
+                      .length.toLocaleString()}{" "}
+                    үг
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="continue-action"
+                  onClick={() => openImportedBook(continueBook)}
+                >
+                  Унших
+                </button>
+              </div>
+            ) : (
+              <div className="continue-card">
+                <div className="continue-cover">＋</div>
+
+                <div style={{ minWidth: 0 }}>
+                  <div className="continue-label">Унших жагсаалт</div>
+                  <div className="continue-title">Эхний номоо нэмээрэй</div>
+                  <div className="continue-meta">
+                    Файл import хийх эсвэл доороос Gutenberg ном сонгож уншина.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="continue-action"
+                  onClick={requestImportFile}
+                  disabled={importingBook}
+                >
+                  Import
+                </button>
+              </div>
+            )}
+          </section>
+
           <section className="my-books-band">
             <div className="my-books-head">
               <div>
-                <h2 className="my-books-title">Миний import хийсэн ном</h2>
+                <div className="library-label">Миний тавиур</div>
+                <h2 className="my-books-title">Номын тавиур</h2>
                 <p className="my-books-sub">
-                  Өөрийн .txt номоо оруулаад үгэн дээр дарж AI тайлбар харна.
+                  Таны import хийсэн номууд бодит тавиур дээрх ном шиг харагдана.
                 </p>
               </div>
 
@@ -1467,7 +2465,7 @@ export default function BookLibrary({
                 onClick={requestImportFile}
                 disabled={importingBook}
               >
-                {importingBook ? "Уншиж байна..." : "+ Өөрийн ном import"}
+                {importingBook ? "Уншиж байна..." : "Ном импортлох"}
               </button>
 
               <input
@@ -1481,78 +2479,81 @@ export default function BookLibrary({
 
             {importError && <div className="lib-error">⚠ {importError}</div>}
 
-            {importedBooks.length > 0 ? (
-              <div className="my-books-row">
-                {importedBooks.map((book) => (
-                  <button
-                    key={book.id}
-                    type="button"
-                    className="my-book-card"
-                    onClick={() => openImportedBook(book)}
-                  >
-                    <div className="my-book-icon">📘</div>
-                    <div className="my-book-name">
-                      {book.name.replace(/\.txt$/i, "")}
-                    </div>
-                    <div className="my-book-meta">
-                      Imported · {new Date(book.importedAt).toLocaleDateString()}
-                      <br />
-                      {book.text.split(/\s+/).filter(Boolean).length.toLocaleString()} words
-                    </div>
-                  </button>
-                ))}
+            <div className="bookshelf">
+              <div className="bookshelf-row">
+                <div className="bookshelf-grid">
+                  <AddBookCard
+                    importingBook={importingBook}
+                    onClick={requestImportFile}
+                  />
+
+                  {importedBooks.map((book) => (
+                    <ImportedBookCard
+                      key={book.id}
+                      book={book}
+                      onOpen={openImportedBook}
+                    />
+                  ))}
+                </div>
               </div>
-            ) : (
+            </div>
+
+            {importedBooks.length === 0 && (
               <div className="my-books-empty">
-                Одоогоор import хийсэн ном алга. .txt номоо import хийгээд эндээсээ сонгож уншина.
+                Одоогоор import хийсэн ном алга. PDF, EPUB, DOCX эсвэл TXT
+                файл оруулахын тулд тавиур дээрх “Ном нэмэх”-ийг дарна уу.
               </div>
             )}
           </section>
 
-          <div className="lib-filters">
-            {TOPICS.map((item) => {
-              const active = !activeSearch && topic === item.value;
+          <section className="discovery-band">
+            <div className="lib-section-head">
+              <div>
+                <div className="library-label">Gutenberg нээлттэй сан</div>
+                <h2 className="lib-section-title">
+                  {activeSearch ? `"${activeSearch}" хайлт` : currentTopicLabel}
+                </h2>
 
-              return (
+                <p className="lib-section-count">
+                  {loading
+                    ? "Номын сангаас хайж байна..."
+                    : hasDiscoveryResults
+                      ? `${books.length} ном уншихад бэлэн`
+                      : "Илэрц олдсонгүй"}
+                </p>
+              </div>
+
+              {hasMore && books.length > 0 && !loading && (
                 <button
-                  key={item.value}
                   type="button"
-                  className={`lib-filter-btn${active ? " active" : ""}`}
-                  onClick={() => handleTopicChange(item.value)}
+                  className="lib-more-top-btn"
+                  onClick={loadMoreBooks}
+                  disabled={loadingMore}
                 >
-                  <span className="lib-filter-icon">{item.icon}</span>
-                  {item.label}
+                  {loadingMore ? "Уншиж байна..." : "Илүү ном"}
                 </button>
-              );
-            })}
-          </div>
-
-          <div className="lib-section-head">
-            <div>
-              <h2 className="lib-section-title">
-                {activeSearch ? `"${activeSearch}"` : currentTopicLabel}
-              </h2>
-
-              <p className="lib-section-count">
-                {loading
-                  ? "Loading books..."
-                  : `${books.length} book${books.length !== 1 ? "s" : ""} available`}
-              </p>
+              )}
             </div>
 
-            {hasMore && books.length > 0 && !loading && (
-              <button
-                type="button"
-                className="lib-more-top-btn"
-                onClick={loadMoreBooks}
-                disabled={loadingMore}
-              >
-                {loadingMore ? "Loading..." : "Load more ↓"}
-              </button>
-            )}
-          </div>
+            <div className="lib-filters">
+              {TOPICS.map((item) => {
+                const active = !activeSearch && topic === item.value;
 
-          <div className="lib-grid">
+                return (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className={`lib-filter-btn${active ? " active" : ""}`}
+                    onClick={() => handleTopicChange(item.value)}
+                  >
+                    <span className="lib-filter-icon">{item.icon}</span>
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="lib-grid">
             {error && <div className="lib-error">⚠ {error}</div>}
 
             {loading &&
@@ -1589,10 +2590,10 @@ export default function BookLibrary({
 
             {!loading && !error && books.length === 0 && (
               <div className="lib-empty">
-                <div className="lib-empty-icon">🔍</div>
-                <h3 className="lib-empty-title">No books found</h3>
+                <div className="lib-empty-icon">⌕</div>
+                <h3 className="lib-empty-title">Ном олдсонгүй</h3>
                 <p className="lib-empty-text">
-                  Try a different title, author, or category.
+                  Өөр нэр, зохиолч эсвэл сэдэв сонгоод дахин хайгаарай.
                 </p>
               </div>
             )}
@@ -1626,7 +2627,7 @@ export default function BookLibrary({
                     )}
 
                     <div className="book-card-overlay">
-                      <span className="book-card-cta">Read now →</span>
+                      <span className="book-card-cta">Унших →</span>
                     </div>
 
                     <div className="book-card-badge">{book.category}</div>
@@ -1638,33 +2639,34 @@ export default function BookLibrary({
 
                     <div className="book-card-meta">
                       <span className="book-card-reads">
-                        {book.downloadCount.toLocaleString()} reads
+                        {book.downloadCount.toLocaleString()} уншилт
                       </span>
                     </div>
                   </div>
                 </Link>
               ))}
-          </div>
-
-          {!loading && hasMore && books.length > 0 && (
-            <div className="lib-load-more">
-              <button
-                type="button"
-                className="lib-load-more-btn"
-                onClick={loadMoreBooks}
-                disabled={loadingMore}
-              >
-                {loadingMore ? (
-                  <>
-                    <span className="lib-load-spinner" />
-                    Loading more...
-                  </>
-                ) : (
-                  <>Show more books</>
-                )}
-              </button>
             </div>
-          )}
+
+            {!loading && hasMore && books.length > 0 && (
+              <div className="lib-load-more">
+                <button
+                  type="button"
+                  className="lib-load-more-btn"
+                  onClick={loadMoreBooks}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? (
+                    <>
+                      <span className="lib-load-spinner" />
+                      Нэмж ачаалж байна...
+                    </>
+                  ) : (
+                    <>Дараагийн номнуудыг харах</>
+                  )}
+                </button>
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </>

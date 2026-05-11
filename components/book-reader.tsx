@@ -2,12 +2,31 @@
 
 import { parseBookFile } from "@/lib/parseBook";
 import { WordData } from "@/lib/push";
+import {
+  markExplainedWordSaved,
+  normalizeExplainedWords,
+  normalizeReaderVocabulary,
+  type ExplainedWordEntry,
+  type ReaderVocabularyEntry,
+  upsertExplainedWord,
+  upsertReaderVocabulary,
+} from "@/lib/vocabulary";
 import Link from "next/link";
 import { AuthModal } from "./AuthModal";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Headphones,
+  Library,
+  Minus,
+  Plus,
+  Settings,
+  Type,
+  UserRound,
+} from "lucide-react";
 import type {
   ChangeEvent,
-  Key,
-  MouseEvent as ReactMouseEvent,
+  CSSProperties,
   ReactNode,
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -17,8 +36,89 @@ function splitText(text: string) {
   return text.split(/(\s+|[.,!?;:"""''()[\]—\-]+)/g).filter(Boolean);
 }
 
+function getCleanBookTitle(title: string) {
+  return (
+    title
+      .replace(/\.(txt|pdf|epub|docx)$/i, "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "Imported Book"
+  );
+}
+
+function cleanReaderText(text: string) {
+  const normalized = text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]*-\n[ \t]*/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/([a-z])\s+([,.;:!?])/gi, "$1$2")
+    .replace(/([“"'])\s+/g, "$1")
+    .replace(/\s+([”"'])/g, "$1")
+    .replace(/[^\S\n]+/g, " ");
+
+  const lines = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return true;
+      if (/^\d{1,4}$/.test(line)) return false;
+      if (/^page\s+\d+(\s+of\s+\d+)?$/i.test(line)) return false;
+      return true;
+    });
+
+  return lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/([^\n.!?”"]) \n(?=[a-z])/g, "$1 ")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function textToParagraphs(text: string) {
+  const cleaned = cleanReaderText(text);
+
+  if (!cleaned) return [];
+
+  const blocks = cleaned
+    .split(/\n{2,}/)
+    .map((block) => block.replace(/\n+/g, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  if (blocks.length > 1) return blocks;
+
+  const sentences =
+    cleaned.replace(/\n+/g, " ").match(/[^.!?]+[.!?”"]+|[^.!?]+$/g) ?? [];
+
+  return sentences
+    .map((sentence) => sentence.trim())
+    .filter(Boolean)
+    .reduce<string[]>((paragraphs, sentence) => {
+      const current = paragraphs[paragraphs.length - 1] ?? "";
+
+      if (!current || current.split(/\s+/).length > 90) {
+        paragraphs.push(sentence.trim());
+      } else {
+        paragraphs[paragraphs.length - 1] = `${current} ${sentence.trim()}`;
+      }
+
+      return paragraphs;
+    }, [])
+    .filter(Boolean);
+}
+
 function cleanWord(word: string) {
   return word.replace(/[^a-zA-Z']/g, "").trim();
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && "type" in error) {
+    return "Үгийн тайлбар ачаалах үед алдаа гарлаа.";
+  }
+  return "AI тайлбар авахад алдаа гарлаа.";
 }
 
 function getSentenceAroundWord(fullText: string, word: string) {
@@ -31,26 +131,47 @@ function getSentenceAroundWord(fullText: string, word: string) {
   ).trim();
 }
 
-const WORDS_PER_PAGE = 120;
+const WORDS_PER_PAGE = 220;
 
-function paginateTokens(tokens: string[]): string[][] {
-  const pages: string[][] = [];
-  let page: string[] = [];
+type ReaderParagraph = {
+  id: string;
+  tokens: string[];
+};
+
+type WordDataExtras = WordData & {
+  mnemonic?: string;
+  memory_tip?: string;
+  memory_trick?: string;
+  similar_words?: string[];
+  similarWords?: string[];
+};
+
+function paginateParagraphs(paragraphs: string[]): ReaderParagraph[][] {
+  const pages: ReaderParagraph[][] = [];
+  let page: ReaderParagraph[] = [];
   let wordCount = 0;
 
-  for (const token of tokens) {
-    page.push(token);
+  paragraphs.forEach((paragraph, paragraphIndex) => {
+    const tokens = splitText(paragraph);
+    const paragraphWordCount = tokens.filter((token) =>
+      /^[a-zA-Z']+$/.test(token)
+    ).length;
 
-    if (/^[a-zA-Z']+$/.test(token)) {
-      wordCount++;
+    if (page.length && wordCount + paragraphWordCount > WORDS_PER_PAGE) {
+      pages.push(page);
+      page = [];
+      wordCount = 0;
     }
+
+    page.push({ id: `p-${paragraphIndex}`, tokens });
+    wordCount += paragraphWordCount;
 
     if (wordCount >= WORDS_PER_PAGE) {
       pages.push(page);
       page = [];
       wordCount = 0;
     }
-  }
+  });
 
   if (page.length) {
     pages.push(page);
@@ -58,14 +179,6 @@ function paginateTokens(tokens: string[]): string[][] {
 
   return pages;
 }
-
-type SavedWord = {
-  key: string;
-  word: string;
-  translation: string;
-  mastered: boolean;
-  addedAt: number;
-};
 
 type BookChapter = {
   index: number;
@@ -92,6 +205,23 @@ type ImportedBookState = {
 type UserStateResponse = {
   state: Record<string, unknown> | null;
 };
+
+function isImportedBookState(value: unknown): value is ImportedBookState {
+  if (!value || typeof value !== "object") return false;
+
+  const book = value as Partial<ImportedBookState>;
+  return (
+    (typeof book.id === "string" || typeof book.id === "undefined") &&
+    typeof book.name === "string" &&
+    typeof book.text === "string" &&
+    typeof book.importedAt === "number" &&
+    Number.isFinite(book.importedAt)
+  );
+}
+
+function getImportedBookList(value: unknown) {
+  return Array.isArray(value) ? value.filter(isImportedBookState) : [];
+}
 
 type ReaderAuthUser = {
   id: string;
@@ -124,12 +254,264 @@ const FORM_LABELS: Record<string, string> = {
   Superlative: "Давуу зэрэг",
 };
 
+type ReaderTheme = "paper" | "white" | "dark";
+
+type ReaderPreferences = {
+  fontSize: number;
+  lineHeight: number;
+  theme: ReaderTheme;
+};
+
+const DEFAULT_READER_PREFERENCES: ReaderPreferences = {
+  fontSize: 19,
+  lineHeight: 1.9,
+  theme: "paper",
+};
+
+function readReaderPreferences(): ReaderPreferences {
+  try {
+    const raw = localStorage.getItem("reader-preferences");
+    if (!raw) return DEFAULT_READER_PREFERENCES;
+
+    const parsed = JSON.parse(raw) as Partial<ReaderPreferences>;
+    return {
+      fontSize:
+        typeof parsed.fontSize === "number"
+          ? Math.min(23, Math.max(16, parsed.fontSize))
+          : DEFAULT_READER_PREFERENCES.fontSize,
+      lineHeight:
+        typeof parsed.lineHeight === "number"
+          ? Math.min(2.2, Math.max(1.55, parsed.lineHeight))
+          : DEFAULT_READER_PREFERENCES.lineHeight,
+      theme:
+        parsed.theme === "white" || parsed.theme === "dark" || parsed.theme === "paper"
+          ? parsed.theme
+          : DEFAULT_READER_PREFERENCES.theme,
+    };
+  } catch {
+    return DEFAULT_READER_PREFERENCES;
+  }
+}
+
+function ReaderToolbar({
+  preferences,
+  onPreferencesChange,
+  open,
+  onToggleOpen,
+}: {
+  preferences: ReaderPreferences;
+  onPreferencesChange: (next: ReaderPreferences) => void;
+  open: boolean;
+  onToggleOpen: () => void;
+}) {
+  function updatePreference(next: Partial<ReaderPreferences>) {
+    onPreferencesChange({ ...preferences, ...next });
+  }
+
+  return (
+    <div className="reader-toolbar">
+      <button
+        className="reader-settings-button"
+        onClick={onToggleOpen}
+        aria-label="Reader settings"
+        title="Reader settings"
+      >
+        <Settings size={20} strokeWidth={2.2} />
+      </button>
+
+      {open && (
+        <div className="reader-settings-panel">
+          <div className="settings-row">
+            <span className="settings-label">
+              <Type size={16} /> Font
+            </span>
+
+            <div className="settings-stepper">
+              <button
+                onClick={() =>
+                  updatePreference({
+                    fontSize: Math.max(16, preferences.fontSize - 1),
+                  })
+                }
+                aria-label="Decrease font size"
+                title="Decrease font size"
+              >
+                <Minus size={16} />
+              </button>
+
+              <span>{preferences.fontSize}px</span>
+
+              <button
+                onClick={() =>
+                  updatePreference({
+                    fontSize: Math.min(23, preferences.fontSize + 1),
+                  })
+                }
+                aria-label="Increase font size"
+                title="Increase font size"
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+          </div>
+
+          <div className="settings-row">
+            <span className="settings-label">Theme</span>
+
+            <div className="theme-segments">
+              {(["paper", "white", "dark"] as ReaderTheme[]).map((theme) => (
+                <button
+                  key={theme}
+                  className={preferences.theme === theme ? "active" : ""}
+                  onClick={() => updatePreference({ theme })}
+                >
+                  {theme}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="settings-row">
+            <span className="settings-label">Line</span>
+
+            <div className="theme-segments">
+              {[1.7, 1.9, 2.1].map((lineHeight) => (
+                <button
+                  key={lineHeight}
+                  className={
+                    preferences.lineHeight === lineHeight ? "active" : ""
+                  }
+                  onClick={() => updatePreference({ lineHeight })}
+                >
+                  {lineHeight.toFixed(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReaderHeader({
+  title,
+  author,
+  chapterTitle,
+  chapterIndex,
+  chapterCount,
+  progress,
+  totalSaved,
+  chapters,
+  onChapterChange,
+  onOpenVocab,
+  user,
+}: {
+  title: string;
+  author: string;
+  chapterTitle: string;
+  chapterIndex: number;
+  chapterCount: number;
+  progress: number;
+  totalSaved: number;
+  chapters: BookChapter[];
+  onChapterChange: (nextChapterIndex: number) => void;
+  onOpenVocab: () => void;
+  user: ReaderAuthUser;
+}) {
+  return (
+    <header className="br-topbar">
+      <div className="br-header-main">
+        <Link href="/" className="br-icon-link" aria-label="Back to library">
+          <ChevronLeft size={19} />
+        </Link>
+
+        <div className="br-book-meta">
+          <div className="chapter-kicker">
+            Chapter {chapterIndex + 1} / {Math.max(chapterCount, 1)}
+          </div>
+          <div className="br-title">{title}</div>
+          <div className="br-author">{author}</div>
+        </div>
+
+        <div className="br-profile-pill" title={user.name}>
+          {user.avatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={user.avatar} alt="" />
+          ) : (
+            <UserRound size={17} />
+          )}
+          <span>{totalSaved} words</span>
+        </div>
+      </div>
+
+      <div className="br-progress-row">
+        <span>{chapterTitle}</span>
+        <div className="br-progress-bar" aria-hidden>
+          <div className="br-progress-fill" style={{ width: `${progress}%` }} />
+        </div>
+        <span>{Math.round(progress)}%</span>
+      </div>
+
+      <div className="br-action-row">
+        {chapters.length > 1 && (
+          <select
+            className="chapter-select"
+            value={chapterIndex}
+            onChange={(e) => onChapterChange(Number(e.target.value))}
+          >
+            {chapters.map((chapter, index) => (
+              <option key={chapter.index} value={index}>
+                {chapter.title}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <Link className="br-vocab-btn" href="/?view=library">
+          <Library size={15} />
+          Номын сан
+        </Link>
+
+        <button className="br-vocab-btn" onClick={onOpenVocab}>
+          Үгийн сан
+          {totalSaved > 0 && <span className="br-vocab-count">{totalSaved}</span>}
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function ReaderShell({
+  children,
+  preferences,
+}: {
+  children: ReactNode;
+  preferences: ReaderPreferences;
+}) {
+  const readerStyle = {
+    "--reader-font-size": `${preferences.fontSize}px`,
+    "--reader-line-height": String(preferences.lineHeight),
+  } as CSSProperties;
+
+  return (
+    <div
+      className={`br-root br-theme-${preferences.theme}`}
+      style={readerStyle}
+    >
+      <div className="br-content-shell">{children}</div>
+    </div>
+  );
+}
+
 export default function BookReader({
   bookId,
   onBookWordSaved,
+  onAIWordExplained,
 }: {
   bookId?: string;
   onBookWordSaved?: (payload: { word: Word; category?: Category | null }) => void;
+  onAIWordExplained?: (entry: ExplainedWordEntry) => void;
 }) {
   const [readerAuthUser, setReaderAuthUser] = useState<ReaderAuthUser | null>(null);
   const [readerAuthChecked, setReaderAuthChecked] = useState(false);
@@ -146,14 +528,17 @@ export default function BookReader({
   const [apiError, setApiError] = useState("");
   const [highlightedWord, setHighlightedWord] = useState("");
   const [fromCache, setFromCache] = useState(false);
-  const [popup, setPopup] = useState({ visible: false, x: 0, y: 0 });
-  const [activeTab, setActiveTab] =
-    useState<"meaning" | "grammar" | "phrases">("meaning");
+  const [popup, setPopup] = useState({ visible: false });
+  const [preferences, setPreferences] = useState<ReaderPreferences>(
+    DEFAULT_READER_PREFERENCES
+  );
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [pageIndex, setPageIndex] = useState(0);
 
   const [vocabOpen, setVocabOpen] = useState(false);
-  const [savedWords, setSavedWords] = useState<SavedWord[]>([]);
+  const [savedWords, setSavedWords] = useState<ReaderVocabularyEntry[]>([]);
+  const [explainedWords, setExplainedWords] = useState<ExplainedWordEntry[]>([]);
   const [toast, setToast] = useState("");
   const [readerStateLoaded, setReaderStateLoaded] = useState(false);
 
@@ -177,7 +562,7 @@ export default function BookReader({
   }
 
   function closePopup() {
-    setPopup({ visible: false, x: 0, y: 0 });
+    setPopup({ visible: false });
     setSelectedWord("");
     setHighlightedWord("");
     setWordData(null);
@@ -185,14 +570,21 @@ export default function BookReader({
     setLoading(false);
   }
 
-  function splitImportedTextIntoOneChapter(text: string, fileName: string) {
+  function splitImportedTextIntoOneChapter(text: string) {
     return [
       {
         index: 0,
-        title: fileName.replace(/\.txt$/i, "") || "Imported Book",
+        title: "Imported Chapter",
         text,
       },
     ];
+  }
+
+  function getVocabularySource() {
+    return {
+      sourceBookId: bookId ?? (book ? String(book.id) : undefined),
+      sourceBookTitle: book?.title ?? chapters[chapterIndex]?.title ?? undefined,
+    };
   }
 
   async function saveUserState(key: string, value: unknown) {
@@ -208,15 +600,17 @@ export default function BookReader({
   }
 
   function applyImportedBook(saved: ImportedBookState) {
-    const importedChapters = splitImportedTextIntoOneChapter(
-      saved.text,
-      saved.name
-    );
+    if (!isImportedBookState(saved) || !saved.text.trim()) {
+      setLoadError("Хадгалсан номын мэдээлэл дутуу байна.");
+      return;
+    }
+
+    const importedChapters = splitImportedTextIntoOneChapter(saved.text);
 
     setBook({
       id: saved.importedAt,
-      title: saved.name.replace(/\.txt$/i, ""),
-      authors: "Imported book",
+      title: getCleanBookTitle(saved.name),
+      authors: "Unknown author",
       cover: null,
       text: saved.text,
       chapters: importedChapters,
@@ -239,7 +633,7 @@ export default function BookReader({
 
     try {
       const raw = localStorage.getItem("imported-books");
-      const currentBooks = raw ? (JSON.parse(raw) as ImportedBookState[]) : [];
+      const currentBooks = raw ? getImportedBookList(JSON.parse(raw)) : [];
       const nextBooks = [
         bookWithId,
         ...currentBooks.filter(
@@ -303,21 +697,6 @@ export default function BookReader({
     }
   }
 
-  function loadLastImportedBook() {
-    try {
-      const raw = localStorage.getItem("last-imported-book");
-
-      if (!raw) {
-        setLoadError("Өмнө import хийсэн ном олдсонгүй.");
-        return;
-      }
-
-      applyImportedBook(JSON.parse(raw) as ImportedBookState);
-    } catch {
-      setLoadError("Хадгалсан ном уншиж чадсангүй.");
-    }
-  }
-
   useEffect(() => {
     fetch("/api/auth/me")
       .then((res) => res.json())
@@ -333,6 +712,14 @@ export default function BookReader({
       window.history.scrollRestoration = "manual";
     }
   }, []);
+
+  useEffect(() => {
+    setPreferences(readReaderPreferences());
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("reader-preferences", JSON.stringify(preferences));
+  }, [preferences]);
 
   useEffect(() => {
     if (!bookId || !readerAuthUser) return;
@@ -353,23 +740,40 @@ export default function BookReader({
           throw new Error("Book not found");
         }
 
-        const data: LoadedBook = await res.json();
+        const data = (await res.json()) as Partial<LoadedBook>;
+        const safeText = typeof data.text === "string" ? data.text : "";
+        const safeChapters = Array.isArray(data.chapters)
+          ? data.chapters.filter(
+              (chapter): chapter is BookChapter =>
+                Boolean(chapter) &&
+                typeof chapter.index === "number" &&
+                typeof chapter.title === "string" &&
+                typeof chapter.text === "string"
+            )
+          : [];
 
         const loadedChapters =
-          data.chapters && data.chapters.length > 0
-            ? data.chapters
+          safeChapters.length > 0
+            ? safeChapters
             : [
                 {
                   index: 0,
                   title: "Full Book",
-                  text: data.text,
+                  text: safeText,
                 },
               ];
 
-        setBook(data);
+        setBook({
+          id: typeof data.id === "number" ? data.id : Number(bookId),
+          title: typeof data.title === "string" ? data.title : "Untitled book",
+          authors: typeof data.authors === "string" ? data.authors : "Unknown author",
+          cover: typeof data.cover === "string" ? data.cover : null,
+          text: safeText,
+          chapters: loadedChapters,
+        });
         setChapters(loadedChapters);
         setChapterIndex(0);
-        setBookText(loadedChapters[0]?.text || data.text || "");
+        setBookText(loadedChapters[0]?.text || safeText || "");
         setPageIndex(0);
         scrollToTop("auto");
       } catch {
@@ -388,7 +792,14 @@ export default function BookReader({
 
       if (!raw) return;
 
-      applyImportedBook(JSON.parse(raw) as ImportedBookState);
+      const selectedBook = JSON.parse(raw);
+
+      if (!isImportedBookState(selectedBook)) {
+        setLoadError("Сонгосон import номын мэдээлэл дутуу байна.");
+        return;
+      }
+
+      applyImportedBook(selectedBook);
     } catch {
       setLoadError("Сонгосон import номыг уншиж чадсангүй.");
     }
@@ -401,7 +812,7 @@ export default function BookReader({
       const raw = localStorage.getItem("reader-vocab");
 
       if (raw) {
-        setSavedWords(JSON.parse(raw) as SavedWord[]);
+        setSavedWords(normalizeReaderVocabulary(JSON.parse(raw)));
       }
     } catch {
       // ignore
@@ -422,23 +833,32 @@ export default function BookReader({
 
         if (!state) return;
 
-        if (Array.isArray(state["reader-vocab"])) {
-          setSavedWords(state["reader-vocab"] as SavedWord[]);
+        const readerVocab = normalizeReaderVocabulary(state["reader-vocab"]);
+
+        if (readerVocab.length > 0 || Array.isArray(state["reader-vocab"])) {
+          setSavedWords(readerVocab);
           localStorage.setItem(
             "reader-vocab",
-            JSON.stringify(state["reader-vocab"])
+            JSON.stringify(readerVocab)
+          );
+        }
+
+        const aiExplainedWords = normalizeExplainedWords(state["ai-explained-words"]);
+
+        if (
+          aiExplainedWords.length > 0 ||
+          Array.isArray(state["ai-explained-words"])
+        ) {
+          setExplainedWords(aiExplainedWords);
+          localStorage.setItem(
+            "ai-explained-words",
+            JSON.stringify(aiExplainedWords)
           );
         }
 
         const importedBook = state["last-imported-book"];
 
-        if (
-          importedBook &&
-          typeof importedBook === "object" &&
-          "name" in importedBook &&
-          "text" in importedBook &&
-          "importedAt" in importedBook
-        ) {
+        if (isImportedBookState(importedBook)) {
           localStorage.setItem(
             "last-imported-book",
             JSON.stringify(importedBook)
@@ -457,6 +877,25 @@ export default function BookReader({
       void saveUserState("reader-vocab", savedWords);
     }
   }, [readerStateLoaded, savedWords]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("ai-explained-words");
+
+      if (raw) {
+        setExplainedWords(normalizeExplainedWords(JSON.parse(raw)));
+      }
+    } catch {
+      // ignore malformed local history
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("ai-explained-words", JSON.stringify(explainedWords));
+    if (readerStateLoaded) {
+      void saveUserState("ai-explained-words", explainedWords);
+    }
+  }, [explainedWords, readerStateLoaded]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -488,36 +927,21 @@ export default function BookReader({
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const allTokens = useMemo(() => splitText(bookText), [bookText]);
-  const pages = useMemo(() => paginateTokens(allTokens), [allTokens]);
-  const pageTokens = pages[pageIndex] ?? [];
+  const displayParagraphs = useMemo(() => textToParagraphs(bookText), [bookText]);
+  const pages = useMemo(
+    () => paginateParagraphs(displayParagraphs),
+    [displayParagraphs]
+  );
+  const pageParagraphs = pages[pageIndex] ?? [];
 
-  const masteredCount = savedWords.filter((word) => word.mastered).length;
+  const masteredCount = savedWords.filter((word) => word.status === "memorized").length;
   const totalSaved = savedWords.length;
 
-  async function handleWordClick(
-    event: ReactMouseEvent<HTMLElement>,
-    rawWord: string
-  ) {
-    const clickedWord = cleanWord(rawWord);
-
-    if (!clickedWord) return;
-
-    setHighlightedWord(clickedWord.toLowerCase());
-    setSelectedWord(clickedWord);
+  async function explainWord(clickedWord: string) {
     setWordData(null);
     setApiError("");
     setLoading(true);
-    setActiveTab("meaning");
     setFromCache(false);
-
-    const rect = event.currentTarget.getBoundingClientRect();
-
-    setPopup({
-      visible: true,
-      x: rect.left + rect.width / 2,
-      y: rect.bottom,
-    });
 
     const sentence = getSentenceAroundWord(bookText, clickedWord);
 
@@ -546,20 +970,46 @@ export default function BookReader({
 
       setWordData(data);
 
-      if (data.savedWord) {
-        onBookWordSaved?.({ word: data.savedWord, category: data.category ?? null });
-      }
+      const source = getVocabularySource();
+      const explainedKey = data.word.trim().toLowerCase();
 
-      saveWord(data);
-    } catch {
-      setApiError("AI тайлбар авахад алдаа гарлаа.");
+      setExplainedWords((prev) => {
+        const next = upsertExplainedWord(prev, data, source);
+        const explainedEntry =
+          next.find((item) => item.key === explainedKey) ?? null;
+
+        if (explainedEntry) {
+          onAIWordExplained?.(explainedEntry);
+        }
+
+        return next;
+      });
+    } catch (error) {
+      console.error("Failed to explain word:", error);
+      setApiError(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
   }
 
-  function saveWord(data: WordData) {
-    const key = data.word.toLowerCase();
+  async function handleWordClick(rawWord: string) {
+    const clickedWord = cleanWord(rawWord);
+
+    if (!clickedWord) return;
+
+    setHighlightedWord(clickedWord.toLowerCase());
+    setSelectedWord(clickedWord);
+    setPopup({ visible: true });
+
+    await explainWord(clickedWord);
+  }
+
+  function saveWord(data: ExplainWordResponse) {
+    if (typeof data.word !== "string" || !data.word.trim()) return;
+
+    const key = data.word.trim().toLowerCase();
+    const source = getVocabularySource();
+    const alreadySaved = savedWords.some((word) => word.key === key);
 
     setSavedWords((prev) => {
       if (prev.some((word) => word.key === key)) {
@@ -569,29 +1019,48 @@ export default function BookReader({
 
       setToast(`✓ "${data.word}" үгийн санд нэмэгдлээ`);
 
-      return [
-        {
-          key,
-          word: data.word,
-          translation: data.primary_translation,
-          mastered: false,
-          addedAt: Date.now(),
-        },
-        ...prev,
-      ];
+      return upsertReaderVocabulary(prev, data, source);
     });
+
+    setExplainedWords((prev) => markExplainedWordSaved(prev, key));
+
+    if (!alreadySaved && "savedWord" in data && data.savedWord) {
+      onBookWordSaved?.({
+        word: data.savedWord,
+        category: "category" in data ? data.category ?? null : null,
+      });
+    }
   }
 
   function toggleMastered(key: string) {
     setSavedWords((prev) =>
       prev.map((word) =>
-        word.key === key ? { ...word, mastered: !word.mastered } : word
+        word.key === key
+          ? {
+              ...word,
+              status: word.status === "memorized" ? "learning" : "memorized",
+              updatedAt: Date.now(),
+            }
+          : word
       )
     );
   }
 
   function removeWord(key: string) {
     setSavedWords((prev) => prev.filter((word) => word.key !== key));
+  }
+
+  function listenToWord(word: string) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      setToast("Listen энэ browser дээр дэмжигдэхгүй байна");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(word);
+    utterance.lang = "en-US";
+    utterance.rate = 0.86;
+    window.speechSynthesis.speak(utterance);
   }
 
   function goToChapter(nextChapterIndex: number) {
@@ -624,36 +1093,22 @@ export default function BookReader({
     scrollToTop();
   }
 
-  function getPopupStyle() {
-    const W = typeof window !== "undefined" ? window.innerWidth : 800;
-    const H = typeof window !== "undefined" ? window.innerHeight : 700;
-
-    const popupWidth = 390;
-    const popupHeight = 430;
-
-    let left = popup.x - popupWidth / 2;
-    let top = popup.y + 14;
-
-    if (left < 16) {
-      left = 16;
-    }
-
-    if (left + popupWidth > W - 16) {
-      left = W - popupWidth - 16;
-    }
-
-    if (top + popupHeight > H - 16) {
-      top = Math.max(16, H - popupHeight - 16);
-    }
-
-    return { left, top };
-  }
-
   const hasGrammar = wordData?.is_inflected && wordData.inflection?.form;
   const hasPhrases = (wordData?.phrases?.length ?? 0) > 0;
+  const wordDataExtras = wordData as WordDataExtras | null;
+  const memoryTip =
+    wordDataExtras?.mnemonic ??
+    wordDataExtras?.memory_tip ??
+    wordDataExtras?.memory_trick ??
+    "";
+  const similarWords =
+    wordDataExtras?.similar_words ?? wordDataExtras?.similarWords ?? [];
   const isWordSaved = wordData
-    ? savedWords.some((word) => word.key === wordData.word.toLowerCase())
+    ? savedWords.some((word) => word.key === wordData.word.trim().toLowerCase())
     : false;
+  const currentSavedWord = wordData
+    ? savedWords.find((word) => word.key === wordData.word.trim().toLowerCase()) ?? null
+    : null;
 
   const pageProgressInChapter =
     pages.length > 0 ? (pageIndex + 1) / pages.length : 0;
@@ -905,9 +1360,9 @@ export default function BookReader({
         }
 
         .word-btn:hover {
-          background: #ffe08a;
-          color: #7a3410;
-          box-shadow: 0 0 0 1px rgba(122, 52, 16, 0.18);
+          background: rgba(254, 240, 138, 0.72);
+          color: #713f12;
+          box-shadow: 0 0 0 1px rgba(202, 138, 4, 0.16);
         }
 
         .word-btn:focus {
@@ -915,18 +1370,18 @@ export default function BookReader({
         }
 
         .word-btn:focus-visible {
-          background: #ffe08a;
-          color: #7a3410;
-          box-shadow: 0 0 0 2px rgba(122, 52, 16, 0.35);
+          background: rgba(254, 240, 138, 0.78);
+          color: #713f12;
+          box-shadow: 0 0 0 2px rgba(202, 138, 4, 0.28);
         }
 
         .word-btn.active {
-          background: #ea580c;
-          color: #ffffff;
+          background: rgba(253, 224, 71, 0.74);
+          color: #713f12;
           font-weight: 800;
           box-shadow:
-            0 0 0 2px rgba(234, 88, 12, 0.35),
-            0 4px 10px rgba(234, 88, 12, 0.25);
+            0 0 0 1px rgba(202, 138, 4, 0.28),
+            inset 0 -2px 0 rgba(202, 138, 4, 0.38);
         }
 
         .word-btn.saved {
@@ -1010,47 +1465,575 @@ export default function BookReader({
           cursor: default;
         }
 
+        .br-root {
+          --paper: #f6eddc;
+          --paper-page: #fffaf0;
+          --paper-soft: #efe2cb;
+          --ink: #221a12;
+          --ink-light: #766a5b;
+          --accent: #16a34a;
+          --accent-soft: #dcfce7;
+          --border: rgba(121, 97, 65, 0.2);
+          min-height: 100vh;
+          padding-bottom: 112px;
+          background:
+            radial-gradient(circle at 18% 0%, rgba(22, 163, 74, 0.14), transparent 26rem),
+            linear-gradient(180deg, #f4ead8 0%, var(--paper) 42%, #eee1cc 100%);
+          color: var(--ink);
+          font-family: 'DM Sans', sans-serif;
+        }
+
+        .br-root.br-theme-white {
+          --paper: #f7faf8;
+          --paper-page: #ffffff;
+          --paper-soft: #edf2f0;
+          --ink: #111827;
+          --ink-light: #647067;
+          --border: rgba(17, 24, 39, 0.12);
+          background: linear-gradient(180deg, #f8fafc 0%, #eef5f1 100%);
+        }
+
+        .br-root.br-theme-dark {
+          --paper: #101815;
+          --paper-page: #17211d;
+          --paper-soft: #223028;
+          --ink: #f3eadb;
+          --ink-light: #b8ad9b;
+          --border: rgba(255, 255, 255, 0.13);
+          --accent-soft: rgba(34, 197, 94, 0.18);
+          background:
+            radial-gradient(circle at 70% 0%, rgba(34, 197, 94, 0.12), transparent 24rem),
+            linear-gradient(180deg, #0d1512 0%, #131d19 100%);
+        }
+
+        .br-topbar {
+          display: grid;
+          gap: 9px;
+          padding: 10px max(14px, env(safe-area-inset-left)) 9px max(14px, env(safe-area-inset-right));
+          border-bottom: 1px solid var(--border);
+          background: color-mix(in srgb, var(--paper-page) 88%, transparent);
+          position: sticky;
+          top: 0;
+          z-index: 40;
+          backdrop-filter: blur(18px);
+          box-shadow: 0 8px 24px rgba(72, 50, 24, 0.08);
+        }
+
+        .br-header-main {
+          display: grid;
+          grid-template-columns: 38px minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .br-icon-link {
+          width: 38px;
+          height: 38px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          border: 1px solid var(--border);
+          color: var(--ink);
+          background: var(--paper-page);
+          text-decoration: none;
+          box-shadow: 0 6px 18px rgba(60, 40, 10, 0.08);
+        }
+
+        .br-book-meta {
+          min-width: 0;
+        }
+
+        .br-title {
+          overflow: hidden;
+          color: var(--ink);
+          font-family: 'Lora', serif;
+          font-size: clamp(1rem, 3.6vw, 1.22rem);
+          font-weight: 800;
+          line-height: 1.15;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          letter-spacing: 0;
+        }
+
+        .br-author {
+          margin-top: 2px;
+          color: var(--ink-light);
+          font-size: 0.75rem;
+          font-weight: 700;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .br-profile-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          min-width: 0;
+          padding: 6px 9px;
+          border: 1px solid var(--border);
+          border-radius: 999px;
+          background: var(--paper-page);
+          color: var(--ink);
+          font-size: 0.73rem;
+          font-weight: 900;
+          white-space: nowrap;
+        }
+
+        .br-profile-pill img {
+          width: 20px;
+          height: 20px;
+          border-radius: 999px;
+          object-fit: cover;
+        }
+
+        .br-progress-row {
+          display: grid;
+          grid-template-columns: minmax(58px, auto) minmax(80px, 1fr) auto;
+          align-items: center;
+          gap: 9px;
+          color: var(--ink-light);
+          font-size: 0.68rem;
+          font-weight: 900;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+
+        .br-progress-row span:first-child {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .br-progress-bar {
+          height: 6px;
+          overflow: hidden;
+          border-radius: 999px;
+          background: var(--paper-soft);
+        }
+
+        .br-progress-fill {
+          height: 100%;
+          border-radius: inherit;
+          background: linear-gradient(90deg, #22c55e, #84cc16);
+          transition: width 0.4s ease;
+        }
+
+        .br-action-row {
+          display: flex;
+          gap: 7px;
+          overflow-x: auto;
+          padding-bottom: 1px;
+          scrollbar-width: none;
+        }
+
+        .br-action-row::-webkit-scrollbar {
+          display: none;
+        }
+
+        .br-vocab-btn,
+        .chapter-select {
+          min-height: 34px;
+          width: auto;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          flex: 0 0 auto;
+          padding: 7px 11px;
+          border-radius: 999px;
+          border: 1px solid var(--border);
+          background: var(--paper-page);
+          color: var(--ink);
+          box-shadow: none;
+          font-family: 'DM Sans', sans-serif;
+          font-size: 0.75rem;
+          font-weight: 900;
+          text-decoration: none;
+          white-space: nowrap;
+        }
+
+        .chapter-select {
+          max-width: min(250px, 68vw);
+          outline: none;
+        }
+
+        .br-vocab-count {
+          background: var(--accent);
+          color: #fff;
+          font-size: 0.65rem;
+          font-weight: 900;
+          padding: 1px 7px;
+          border-radius: 100px;
+        }
+
+        .reader-toolbar {
+          position: fixed;
+          right: 16px;
+          bottom: 92px;
+          z-index: 120;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 10px;
+        }
+
+        .reader-settings-button {
+          width: 48px;
+          height: 48px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid rgba(22, 163, 74, 0.28);
+          border-radius: 999px;
+          background: #16a34a;
+          color: #fff;
+          box-shadow: 0 16px 36px rgba(22, 163, 74, 0.3);
+          padding: 0;
+        }
+
+        .reader-settings-panel {
+          width: min(330px, calc(100vw - 32px));
+          padding: 14px;
+          border: 1px solid var(--border);
+          border-radius: 20px;
+          background: color-mix(in srgb, var(--paper-page) 96%, transparent);
+          color: var(--ink);
+          box-shadow: 0 24px 70px rgba(40, 28, 12, 0.2);
+          backdrop-filter: blur(18px);
+        }
+
+        .settings-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 8px 0;
+        }
+
+        .settings-row + .settings-row {
+          border-top: 1px solid var(--border);
+        }
+
+        .settings-label {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          color: var(--ink-light);
+          font-size: 0.78rem;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .settings-stepper,
+        .theme-segments {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 3px;
+          border-radius: 999px;
+          background: var(--paper-soft);
+        }
+
+        .settings-stepper button,
+        .theme-segments button {
+          width: auto;
+          min-width: 34px;
+          min-height: 30px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 0;
+          border-radius: 999px;
+          background: transparent;
+          color: var(--ink);
+          box-shadow: none;
+          padding: 5px 9px;
+          font-size: 0.72rem;
+          font-weight: 900;
+          text-transform: capitalize;
+        }
+
+        .settings-stepper span {
+          min-width: 44px;
+          color: var(--ink);
+          text-align: center;
+          font-size: 0.76rem;
+          font-weight: 900;
+        }
+
+        .theme-segments button.active {
+          background: var(--paper-page);
+          color: var(--accent);
+          box-shadow: 0 3px 10px rgba(60, 40, 10, 0.1);
+        }
+
+        .br-body {
+          width: min(100%, 820px);
+          margin: 0 auto;
+          padding: 22px 14px 18px;
+        }
+
+        .chapter-heading {
+          width: min(100%, 700px);
+          margin: 0 auto 0;
+          padding: clamp(24px, 7vw, 44px) clamp(18px, 6vw, 54px) 18px;
+          border: 1px solid var(--border);
+          border-bottom: 0;
+          border-radius: 28px 28px 0 0;
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.34), transparent),
+            var(--paper-page);
+          box-shadow: 0 18px 45px rgba(72, 50, 24, 0.11);
+          text-align: center;
+        }
+
+        .chapter-kicker {
+          margin-bottom: 8px;
+          color: var(--accent);
+          font-family: 'DM Sans', sans-serif;
+          font-size: 0.68rem;
+          font-weight: 900;
+          letter-spacing: 0.13em;
+          text-transform: uppercase;
+        }
+
+        .chapter-title {
+          margin: 0;
+          color: var(--ink);
+          font-family: 'Lora', Georgia, serif;
+          font-size: clamp(1.55rem, 7vw, 2.5rem);
+          font-weight: 800;
+          line-height: 1.16;
+          letter-spacing: 0;
+        }
+
+        .chapter-author {
+          margin: 10px 0 0;
+          color: var(--ink-light);
+          font-size: 0.86rem;
+          font-weight: 800;
+        }
+
+        .br-text {
+          width: min(100%, 700px);
+          margin: 0 auto;
+          padding: clamp(24px, 7vw, 54px) clamp(19px, 6vw, 58px);
+          border: 1px solid var(--border);
+          border-top: 0;
+          border-radius: 0 0 28px 28px;
+          background:
+            linear-gradient(90deg, rgba(121, 97, 65, 0.05), transparent 9%, transparent 91%, rgba(121, 97, 65, 0.04)),
+            radial-gradient(circle at 12% 18%, rgba(255,255,255,0.36), transparent 12rem),
+            var(--paper-page);
+          box-shadow:
+            inset 8px 0 18px rgba(121, 97, 65, 0.045),
+            0 26px 60px rgba(72, 50, 24, 0.14);
+          color: var(--ink);
+          font-family: 'EB Garamond', Georgia, serif;
+          font-size: var(--reader-font-size);
+          line-height: var(--reader-line-height);
+          letter-spacing: 0;
+          word-spacing: normal;
+          text-align: left;
+          word-break: normal;
+          overflow-wrap: break-word;
+          hyphens: auto;
+        }
+
+        .reader-paragraph {
+          margin: 0 0 1.15em;
+        }
+
+        .reader-paragraph + .reader-paragraph {
+          text-indent: 1.2em;
+        }
+
+        .word-btn {
+          display: inline;
+          font-family: inherit;
+          font-size: inherit;
+          font-weight: inherit;
+          line-height: inherit;
+          letter-spacing: inherit;
+          color: inherit;
+          background: transparent;
+          border: 0;
+          border-radius: 8px;
+          box-shadow: inset 0 -0.13em rgba(22, 163, 74, 0.23);
+          padding: 0 0.05em;
+          margin: 0;
+          cursor: pointer;
+          text-align: inherit;
+          vertical-align: baseline;
+          appearance: none;
+          -webkit-appearance: none;
+          transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+        }
+
+        .word-btn:hover,
+        .word-btn:focus-visible {
+          outline: none;
+          background: rgba(187, 247, 208, 0.58);
+          color: var(--ink);
+          box-shadow: inset 0 -0.34em rgba(34, 197, 94, 0.28);
+        }
+
+        .word-btn.active {
+          background: rgba(34, 197, 94, 0.2);
+          color: var(--ink);
+          font-weight: 700;
+          box-shadow:
+            inset 0 -0.48em rgba(34, 197, 94, 0.34),
+            0 0 0 2px rgba(34, 197, 94, 0.12);
+        }
+
+        .word-btn.saved {
+          color: var(--ink);
+          font-weight: 600;
+          box-shadow: inset 0 -0.18em rgba(59, 130, 246, 0.32);
+        }
+
+        .word-btn.mastered {
+          color: var(--ink);
+          font-weight: 700;
+          box-shadow: inset 0 -0.18em rgba(22, 163, 74, 0.45);
+        }
+
+        .br-pagination {
+          width: min(100%, 700px);
+          display: grid;
+          grid-template-columns: minmax(92px, 1fr) auto minmax(92px, 1fr);
+          align-items: center;
+          gap: 10px;
+          margin: 18px auto 0;
+          padding: 0 2px;
+          border-top: 0;
+        }
+
+        .br-page-info {
+          color: var(--ink-light);
+          font-family: 'DM Sans', sans-serif;
+          font-size: 0.72rem;
+          font-weight: 900;
+          letter-spacing: 0.05em;
+          line-height: 1.45;
+          text-align: center;
+          text-transform: uppercase;
+        }
+
+        .br-page-btn {
+          width: auto;
+          min-height: 42px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 10px 14px;
+          border: 1px solid var(--border);
+          border-radius: 999px;
+          background: var(--paper-page);
+          color: var(--ink);
+          box-shadow: 0 8px 22px rgba(72, 50, 24, 0.08);
+          font-family: 'DM Sans', sans-serif;
+          font-size: 0.78rem;
+          font-weight: 900;
+        }
+
         .popup {
           font-family: 'DM Sans', sans-serif;
-          background: #ffffff;
-          color: #111111;
-          border: 2px solid #7a3410;
-          border-radius: 20px;
+          background: color-mix(in srgb, var(--paper-page) 97%, white);
+          color: var(--ink);
+          border: 1px solid rgba(22, 163, 74, 0.24);
+          border-radius: 28px;
           box-shadow:
-            0 24px 80px rgba(0, 0, 0, 0.35),
-            0 0 0 9999px rgba(0, 0, 0, 0.06);
-          animation: popIn 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+            0 24px 70px rgba(20, 31, 24, 0.22),
+            0 0 0 9999px rgba(30, 24, 14, 0.08);
+          animation: sheetIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+          position: fixed;
+          left: 50%;
+          right: auto;
+          bottom: 18px;
+          width: min(calc(100vw - 32px), 520px);
+          max-height: min(86vh, 720px);
+          transform: translateX(-50%);
           overflow: hidden;
+          display: flex;
+          flex-direction: column;
           opacity: 1;
+          z-index: 9999;
+        }
+
+        .popup::before {
+          content: "";
+          display: block;
+          width: 42px;
+          height: 4px;
+          flex: 0 0 auto;
+          margin: 12px auto 4px;
+          border-radius: 999px;
+          background: color-mix(in srgb, var(--ink-light) 34%, transparent);
         }
 
         .popup-header {
-          padding: 18px 20px 0;
-          background: #ffffff;
-          color: #111111;
+          padding: 10px 18px 0;
+          background: transparent;
+          color: var(--ink);
+          flex: 0 0 auto;
+        }
+
+        .popup-topline {
+          color: var(--ink-light);
+          font-size: 0.68rem;
+          font-weight: 900;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          margin-bottom: 5px;
+        }
+
+        .popup-title-row {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 12px;
+          padding-right: 38px;
+        }
+
+        .popup-badges {
+          display: flex;
+          flex-direction: row;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 6px;
+          margin-top: 10px;
         }
 
         .popup-body {
-          padding: 16px 20px 18px;
-          max-height: 340px;
+          padding: 14px 18px max(18px, env(safe-area-inset-bottom));
+          max-height: none;
           overflow-y: auto;
-          background: #ffffff;
-          color: #111111;
+          overscroll-behavior: contain;
+          background: transparent;
+          color: var(--ink);
+          flex: 1 1 auto;
         }
 
         .popup-word {
           font-family: 'Lora', serif;
-          font-size: 1.55rem;
+          font-size: clamp(2rem, 7vw, 2.75rem);
           font-weight: 800;
-          color: #111111;
-          letter-spacing: -0.02em;
-          line-height: 1.2;
+          color: var(--ink);
+          letter-spacing: 0;
+          line-height: 1.05;
         }
 
         .popup-base,
-        .popup-ipa {
+        .popup-ipa,
+        .popup-source {
           font-size: 0.82rem;
-          color: #111111;
+          color: var(--ink-light);
           margin-top: 2px;
         }
 
@@ -1063,7 +2046,7 @@ export default function BookReader({
           font-weight: 800;
           text-transform: uppercase;
           letter-spacing: 0.12em;
-          color: #111111;
+          color: var(--ink-light);
           margin-bottom: 5px;
         }
 
@@ -1071,7 +2054,7 @@ export default function BookReader({
           font-family: 'Lora', serif;
           font-size: 1.35rem;
           font-weight: 800;
-          color: #111111;
+          color: var(--ink);
           line-height: 1.35;
         }
 
@@ -1112,6 +2095,89 @@ export default function BookReader({
 
         .section {
           margin-bottom: 12px;
+        }
+
+        .mn-explanation {
+          margin: 0;
+          color: var(--ink);
+          font-size: 0.9rem;
+          line-height: 1.7;
+        }
+
+        .ai-loading {
+          padding: 18px;
+        }
+
+        .ai-loading-head {
+          display: grid;
+          gap: 7px;
+          margin-bottom: 16px;
+        }
+
+        .ai-skeleton-line {
+          height: 12px;
+          border-radius: 999px;
+          background: linear-gradient(
+            90deg,
+            color-mix(in srgb, var(--paper-soft) 78%, transparent) 25%,
+            color-mix(in srgb, var(--paper-page) 92%, white) 50%,
+            color-mix(in srgb, var(--paper-soft) 78%, transparent) 75%
+          );
+          background-size: 200% 100%;
+          animation: skeletonShimmer 1.35s ease-in-out infinite;
+        }
+
+        .ai-skeleton-line.short {
+          width: 46%;
+        }
+
+        .ai-skeleton-line.mid {
+          width: 72%;
+        }
+
+        .ai-error-state {
+          padding: 20px 18px;
+        }
+
+        .ai-error-title {
+          margin: 0 0 6px;
+          color: var(--ink);
+          font-size: 1rem;
+          font-weight: 900;
+        }
+
+        .ai-error-text {
+          margin: 0 0 14px;
+          color: var(--ink-light);
+          font-size: 0.86rem;
+          line-height: 1.6;
+        }
+
+        .ai-error-actions {
+          display: flex;
+          gap: 8px;
+        }
+
+        .ai-retry-btn {
+          width: auto;
+          min-height: 36px;
+          padding: 8px 13px;
+          border: 0;
+          border-radius: 999px;
+          background: var(--accent);
+          color: #fff;
+          box-shadow: none;
+          font-size: 0.78rem;
+          font-weight: 900;
+        }
+
+        @keyframes skeletonShimmer {
+          0% {
+            background-position: 120% 0;
+          }
+          100% {
+            background-position: -120% 0;
+          }
         }
 
         .grammar-box {
@@ -1275,7 +2341,7 @@ export default function BookReader({
         .popup li,
         .popup strong,
         .popup em {
-          color: #111111;
+          color: inherit;
         }
 
         .badge {
@@ -1301,32 +2367,199 @@ export default function BookReader({
           display: flex;
           align-items: center;
           gap: 6px;
-          padding: 8px 14px;
+          min-height: 36px;
+          padding: 8px 12px;
           border-radius: 100px;
-          border: 1.5px solid var(--border);
-          background: #fff;
-          color: #111111;
+          border: 1px solid rgba(22, 163, 74, 0.28);
+          background: var(--accent);
+          color: #ffffff;
           font-family: 'DM Sans', sans-serif;
           font-size: 0.75rem;
           font-weight: 800;
           cursor: pointer;
           transition: all 0.15s;
-          margin-top: 10px;
           width: 100%;
           justify-content: center;
+          box-shadow: none;
         }
 
         .save-word-btn:hover:not(.saved) {
-          border-color: #16a34a;
-          color: #111111;
-          background: #f0fdf4;
+          border-color: #15803d;
+          color: #ffffff;
+          background: #15803d;
         }
 
         .save-word-btn.saved {
           border-color: #86efac;
-          color: #111111;
+          color: #166534;
           background: #f0fdf4;
           cursor: default;
+        }
+
+        .word-popover-actions {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 8px;
+          margin-top: 12px;
+        }
+
+        .listen-word-btn {
+          width: auto;
+          min-height: 36px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          padding: 8px 12px;
+          border: 1px solid var(--border);
+          border-radius: 999px;
+          background: var(--paper-page);
+          color: var(--ink);
+          box-shadow: none;
+          font-size: 0.75rem;
+          font-weight: 900;
+        }
+
+        .word-sheet-listen {
+          width: 38px;
+          height: 38px;
+          min-height: 38px;
+          padding: 0;
+          flex-shrink: 0;
+          background: var(--accent-soft);
+          color: var(--accent);
+          border-color: rgba(22, 163, 74, 0.18);
+        }
+
+        .word-sheet-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-top: 14px;
+          overflow-x: auto;
+          padding-bottom: 2px;
+          scrollbar-width: none;
+        }
+
+        .word-sheet-actions::-webkit-scrollbar {
+          display: none;
+        }
+
+        .word-sheet-actions .save-word-btn,
+        .word-sheet-actions .listen-word-btn {
+          width: auto;
+          flex: 0 0 auto;
+        }
+
+        .word-sheet-actions .save-word-btn {
+          min-height: 40px;
+          padding: 9px 14px;
+          background: var(--accent);
+          border-color: transparent;
+        }
+
+        .word-sheet-actions .listen-word-btn {
+          min-height: 40px;
+          padding: 9px 13px;
+        }
+
+        .explanation-stack {
+          display: grid;
+          gap: 12px;
+        }
+
+        .explain-card {
+          border: 1px solid rgba(91, 73, 49, 0.14);
+          border-radius: 20px;
+          background: rgba(255, 252, 244, 0.82);
+          padding: 14px;
+          box-shadow: 0 8px 24px rgba(74, 54, 28, 0.06);
+        }
+
+        .explain-card.featured {
+          border-color: rgba(22, 163, 74, 0.22);
+          background:
+            linear-gradient(135deg, rgba(232, 247, 237, 0.72), rgba(255, 252, 244, 0.92));
+        }
+
+        .explain-card-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 8px;
+        }
+
+        .explain-card-title {
+          margin: 0;
+          color: var(--ink);
+          font-size: 0.8rem;
+          font-weight: 950;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+
+        .explain-card-text {
+          margin: 0;
+          color: var(--ink);
+          font-size: 0.96rem;
+          line-height: 1.72;
+          overflow-wrap: anywhere;
+        }
+
+        .explain-card-text.primary {
+          font-size: 1.05rem;
+          font-weight: 750;
+        }
+
+        .translation-main {
+          font-family: 'Lora', serif;
+          color: var(--ink);
+          font-size: 1.45rem;
+          font-weight: 850;
+          line-height: 1.25;
+          margin: 0;
+        }
+
+        .translation-chips,
+        .similar-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 7px;
+          margin-top: 10px;
+        }
+
+        .translation-chip,
+        .similar-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          max-width: 100%;
+          border-radius: 999px;
+          padding: 6px 10px;
+          background: rgba(22, 163, 74, 0.08);
+          color: var(--ink);
+          font-size: 0.78rem;
+          font-weight: 850;
+          overflow-wrap: anywhere;
+        }
+
+        .example-card-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+        }
+
+        .example-card-copy {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .sheet-empty-note {
+          margin: 0;
+          color: var(--ink-light);
+          font-size: 0.88rem;
+          line-height: 1.55;
         }
 
         .loading-dots span {
@@ -1375,10 +2608,10 @@ export default function BookReader({
           top: 12px;
           width: 30px;
           height: 30px;
-          background: #f3e7d8;
-          border: 1px solid #d4c5a9;
+          background: var(--paper-soft);
+          border: 1px solid var(--border);
           cursor: pointer;
-          color: #111111;
+          color: var(--ink);
           font-size: 1.35rem;
           font-weight: 800;
           border-radius: 50%;
@@ -1521,6 +2754,15 @@ export default function BookReader({
           font-size: 0.8rem;
           color: #4b5563;
           margin-top: 2px;
+        }
+
+        .vocab-item-source {
+          font-size: 0.72rem;
+          color: #7c6f5f;
+          margin-top: 4px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .vocab-check-btn {
@@ -1676,8 +2918,8 @@ export default function BookReader({
 
         @media (max-width: 720px) {
           .br-topbar {
-            align-items: flex-start;
-            flex-direction: column;
+            display: grid;
+            align-items: stretch;
           }
 
           .br-left {
@@ -1702,78 +2944,489 @@ export default function BookReader({
 
         @media (max-width: 640px) {
           .br-body {
-            padding: 32px 24px 24px;
+            padding: 18px 10px 18px;
           }
 
           .br-pagination {
-            padding: 16px 24px 24px;
+            padding: 0 2px;
+          }
+        }
+
+        @media (max-width: 520px) {
+          .br-root {
+            padding-bottom: 128px;
+          }
+
+          .br-topbar {
+            padding-top: max(8px, env(safe-area-inset-top));
+          }
+
+          .br-header-main {
+            grid-template-columns: 34px minmax(0, 1fr) auto;
+            gap: 8px;
+          }
+
+          .br-icon-link {
+            width: 34px;
+            height: 34px;
+          }
+
+          .br-profile-pill span {
+            display: none;
+          }
+
+          .br-progress-row {
+            grid-template-columns: minmax(40px, 0.5fr) minmax(80px, 1fr) auto;
+            gap: 7px;
+          }
+
+          .br-action-row {
+            margin-inline: -2px;
+          }
+
+          .chapter-heading,
+          .br-text {
+            border-radius: 22px 22px 0 0;
+          }
+
+          .br-text {
+            border-radius: 0 0 22px 22px;
+          }
+
+          .reader-paragraph + .reader-paragraph {
+            text-indent: 0.85em;
+          }
+
+          .br-pagination {
+            grid-template-columns: 1fr;
+          }
+
+          .br-page-info {
+            order: -1;
+          }
+
+          .br-page-btn {
+            width: 100%;
+          }
+
+          .reader-toolbar {
+            right: 12px;
+            bottom: 88px;
+          }
+
+          .popup {
+            width: min(calc(100vw - 32px), 520px) !important;
+          }
+        }
+
+        @media (min-width: 761px) {
+          .popup {
+            max-height: min(86vh, 720px);
+          }
+        }
+
+        @media (max-width: 760px) {
+          .popup {
+            left: 0 !important;
+            right: 0 !important;
+            top: auto !important;
+            bottom: 0 !important;
+            transform: none;
+            width: 100vw !important;
+            max-height: min(88vh, 720px);
+            border-right: 0;
+            border-bottom: 0;
+            border-left: 0;
+            border-radius: 28px 28px 0 0;
+            box-shadow:
+              0 -20px 60px rgba(20, 31, 24, 0.2),
+              0 0 0 9999px rgba(30, 24, 14, 0.14);
+            animation: sheetInMobile 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+          }
+
+          .popup::before {
+            display: block;
+          }
+
+          .popup-header {
+            padding: 10px 18px 0;
+          }
+
+          .popup-body {
+            padding-bottom: max(18px, env(safe-area-inset-bottom));
+          }
+
+          .close-btn {
+            top: 14px;
+          }
+
+          .word-popover-actions {
+            grid-template-columns: 1fr 1fr;
+          }
+        }
+
+        @keyframes sheetIn {
+          from {
+            transform: translate(-50%, 100%);
+          }
+          to {
+            transform: translate(-50%, 0);
+          }
+        }
+
+        @keyframes sheetInMobile {
+          from {
+            transform: translateY(100%);
+          }
+          to {
+            transform: translateY(0);
+          }
+        }
+
+        /* Reader page redesign layer: scoped overrides, logic untouched. */
+        .br-root {
+          --reader-shell: var(--ds-bg, #f5f3ed);
+          --paper: #f2e7d4;
+          --paper-page: #fff9ec;
+          --paper-soft: #eadcc5;
+          --ink: #211b13;
+          --ink-light: #716554;
+          --accent: var(--ds-primary, #16a34a);
+          --accent-soft: var(--ds-primary-soft, #e8f7ed);
+          --border: rgba(91, 73, 49, 0.18);
+          background:
+            radial-gradient(circle at 16% 0%, rgba(22, 163, 74, 0.08), transparent 24rem),
+            linear-gradient(180deg, #f7efe2 0%, #efe2cd 58%, #e7dac5 100%);
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          overflow-x: hidden;
+        }
+
+        .br-content-shell {
+          width: min(100%, 920px);
+          min-height: 100vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          box-sizing: border-box;
+        }
+
+        .br-root.br-theme-white {
+          --paper: #f6f8f5;
+          --paper-page: #ffffff;
+          --paper-soft: #e8eee8;
+        }
+
+        .br-root.br-theme-dark {
+          --paper: #0f1713;
+          --paper-page: #18231e;
+          --paper-soft: #253229;
+          --ink: #f5ead9;
+          --ink-light: #c1b5a4;
+          --border: rgba(255, 255, 255, 0.12);
+        }
+
+        .br-topbar {
+          width: 100%;
+          align-self: center;
+          box-sizing: border-box;
+          border-bottom: 1px solid var(--border);
+          background: color-mix(in srgb, var(--paper-page) 90%, transparent);
+          box-shadow: 0 10px 30px rgba(55, 38, 18, 0.08);
+        }
+
+        .br-icon-link,
+        .br-vocab-btn,
+        .chapter-select,
+        .br-profile-pill {
+          border-color: var(--border);
+          background: color-mix(in srgb, var(--paper-page) 92%, transparent);
+        }
+
+        .br-icon-link:hover,
+        .br-vocab-btn:hover {
+          border-color: rgba(22, 163, 74, 0.28);
+          background: var(--accent-soft);
+          color: var(--accent);
+        }
+
+        .br-progress-bar {
+          background: color-mix(in srgb, var(--paper-soft) 82%, transparent);
+        }
+
+        .br-progress-fill {
+          background: linear-gradient(90deg, #15803d, #22c55e, #a3e635);
+        }
+
+        .br-body {
+          width: min(100%, 860px);
+          margin-inline: auto;
+          padding-top: clamp(16px, 4vw, 30px);
+        }
+
+        .br-pagination {
+          align-self: center;
+          margin-inline: auto;
+        }
+
+        .chapter-heading {
+          width: min(100%, 720px);
+          border-color: var(--border);
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.42), transparent 54%),
+            radial-gradient(circle at 50% -10%, rgba(22, 163, 74, 0.08), transparent 14rem),
+            var(--paper-page);
+          box-shadow: 0 18px 44px rgba(73, 50, 24, 0.1);
+        }
+
+        .chapter-title {
+          max-width: 620px;
+          margin-inline: auto;
+          font-size: clamp(1.45rem, 6vw, 2.35rem);
+        }
+
+        .chapter-author {
+          font-weight: 700;
+        }
+
+        .br-text {
+          width: min(100%, 720px);
+          min-height: min(68vh, 780px);
+          border-color: var(--border);
+          background:
+            linear-gradient(90deg, rgba(91,73,49,0.04), transparent 10%, transparent 90%, rgba(91,73,49,0.035)),
+            radial-gradient(circle at 24% 12%, rgba(255,255,255,0.42), transparent 13rem),
+            linear-gradient(180deg, var(--paper-page), color-mix(in srgb, var(--paper-page) 92%, var(--paper-soft)));
+          box-shadow:
+            inset 10px 0 24px rgba(91, 73, 49, 0.045),
+            inset -10px 0 22px rgba(91, 73, 49, 0.025),
+            0 28px 70px rgba(73, 50, 24, 0.13);
+          font-size: clamp(18px, 4.6vw, var(--reader-font-size));
+          line-height: var(--reader-line-height);
+        }
+
+        .reader-paragraph {
+          margin-bottom: 1.22em;
+        }
+
+        .word-btn {
+          border-radius: 0.42em;
+          box-shadow: inset 0 -0.12em rgba(22, 163, 74, 0.2);
+        }
+
+        .word-btn:hover,
+        .word-btn:focus-visible {
+          background: rgba(236, 253, 245, 0.82);
+          box-shadow: inset 0 -0.42em rgba(34, 197, 94, 0.24);
+        }
+
+        .word-btn.active {
+          background: rgba(255, 237, 166, 0.5);
+          box-shadow:
+            inset 0 -0.55em rgba(250, 204, 21, 0.32),
+            0 0 0 2px rgba(22, 163, 74, 0.11);
+        }
+
+        .word-btn.saved {
+          box-shadow: inset 0 -0.2em rgba(14, 165, 233, 0.28);
+        }
+
+        .word-btn.mastered {
+          box-shadow: inset 0 -0.2em rgba(22, 163, 74, 0.42);
+        }
+
+        .br-pagination {
+          width: min(100% - 20px, 720px);
+          margin-top: 14px;
+          padding: 10px;
+          border: 1px solid var(--border);
+          border-radius: 999px;
+          background: color-mix(in srgb, var(--paper-page) 90%, transparent);
+          box-shadow: 0 18px 42px rgba(73, 50, 24, 0.1);
+          backdrop-filter: blur(16px);
+        }
+
+        .br-page-btn {
+          min-height: 40px;
+          border-color: transparent;
+          background: transparent;
+          box-shadow: none;
+        }
+
+        .br-page-btn:hover:not(:disabled) {
+          background: var(--accent-soft);
+          color: var(--accent);
+        }
+
+        .reader-toolbar {
+          bottom: calc(24px + env(safe-area-inset-bottom));
+        }
+
+        .reader-settings-button {
+          background: var(--accent);
+          box-shadow: 0 14px 34px rgba(22, 163, 74, 0.28);
+        }
+
+        .reader-settings-panel {
+          border-radius: 18px;
+          background: color-mix(in srgb, var(--paper-page) 97%, transparent);
+        }
+
+        @media (min-width: 900px) {
+          .br-content-shell {
+            padding-inline: 24px;
+          }
+
+          .br-topbar {
+            margin-top: 12px;
+            border: 1px solid var(--border);
+            border-radius: 24px;
+          }
+
+          .br-action-row {
+            justify-content: center;
+            overflow-x: visible;
+            flex-wrap: wrap;
+          }
+        }
+
+        .empty-book-box {
+          width: min(100%, 680px);
+          margin: 22px auto 0;
+          padding: clamp(34px, 8vw, 58px) 22px;
+          border: 1px dashed var(--border);
+          background:
+            radial-gradient(circle at 50% 0%, rgba(22, 163, 74, 0.1), transparent 14rem),
+            var(--paper-page);
+          box-shadow: 0 20px 52px rgba(73, 50, 24, 0.1);
+        }
+
+        .empty-book-icon {
+          width: 58px;
+          height: 74px;
+          display: grid;
+          place-items: center;
+          margin: 0 auto 18px;
+          border-radius: 12px;
+          background: linear-gradient(145deg, #2f5f43, #d88a2d);
+          color: #fff;
+          font-size: 1.6rem;
+          box-shadow: inset -9px 0 16px rgba(0,0,0,0.16);
+        }
+
+        .empty-book-title {
+          font-family: 'DM Sans', sans-serif;
+          font-size: clamp(1.25rem, 5vw, 1.65rem);
+          font-weight: 900;
+        }
+
+        .empty-book-text {
+          color: var(--ink-light);
+        }
+
+        .import-main-btn {
+          border: 0;
+          background: var(--accent);
+          box-shadow: 0 12px 28px rgba(22, 163, 74, 0.2);
+        }
+
+        @media (max-width: 640px) {
+          .br-root {
+            padding-bottom: calc(72px + env(safe-area-inset-bottom));
+          }
+
+          .br-topbar {
+            gap: 8px;
+            padding-inline: 10px;
+          }
+
+          .br-title {
+            font-size: 0.98rem;
+          }
+
+          .br-author {
+            font-size: 0.7rem;
+          }
+
+          .br-action-row {
+            padding-bottom: 2px;
+          }
+
+          .br-vocab-btn,
+          .chapter-select {
+            min-height: 32px;
+            padding: 6px 10px;
+            font-size: 0.72rem;
+          }
+
+          .chapter-heading {
+            padding: 22px 18px 15px;
+          }
+
+          .br-text {
+            min-height: 62vh;
+            padding: 26px 20px 32px;
+          }
+
+          .br-pagination {
+            position: sticky;
+            bottom: calc(10px + env(safe-area-inset-bottom));
+            z-index: 35;
+            grid-template-columns: 1fr auto 1fr;
+            border-radius: 22px;
+          }
+
+          .br-page-info {
+            order: initial;
+            font-size: 0.64rem;
+          }
+
+          .br-page-btn {
+            width: auto;
+            min-width: 82px;
+            padding-inline: 10px;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .br-pagination {
+            grid-template-columns: 1fr;
+            border-radius: 20px;
+          }
+
+          .br-page-info {
+            order: -1;
+          }
+
+          .br-page-btn {
+            width: 100%;
           }
         }
       `}</style>
 
-      <div className="br-root">
-        <div className="br-topbar">
-          <div className="br-left">
-            <Link href="/" className="br-back-btn">
-            ← Library
-            </Link>
+      <ReaderShell preferences={preferences}>
+        <ReaderHeader
+          title={book?.title || "Номын Уншигч"}
+          author={book?.authors?.trim() || "Unknown author"}
+          chapterTitle={chapters[chapterIndex]?.title || "Ready to read"}
+          chapterIndex={chapterIndex}
+          chapterCount={chapters.length}
+          progress={totalProgress}
+          totalSaved={totalSaved}
+          chapters={chapters}
+          onChapterChange={goToChapter}
+          onOpenVocab={() => setVocabOpen(true)}
+          user={readerAuthUser}
+        />
 
-            <div className="br-book-meta">
-              <div className="br-title">📖 {book?.title || "Номын Уншигч"}</div>
-              {book?.authors && <div className="br-author">{book.authors}</div>}
-            </div>
-          </div>
-
-          <div className="br-topbar-right">
-            {chapters.length > 1 && (
-              <select
-                className="chapter-select"
-                value={chapterIndex}
-                onChange={(e) => goToChapter(Number(e.target.value))}
-              >
-                {chapters.map((chapter, index) => (
-                  <option key={chapter.index} value={index}>
-                    {chapter.title}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            <label className="br-vocab-btn">
-              {importingBook ? "Уншиж байна..." : "Ном import"}
-              <input
-                type="file"
-                accept=".txt,.pdf,.epub,.docx"
-                onChange={handleBookUpload}
-                style={{ display: "none" }}
-              />
-            </label>
-
-            <button className="br-vocab-btn" onClick={loadLastImportedBook}>
-              Сүүлд уншсан
-            </button>
-
-            <Link className="br-vocab-btn" href="/?view=library">
-              Номын сан
-            </Link>
-
-            <button className="br-vocab-btn" onClick={() => setVocabOpen(true)}>
-              Үгийн сан
-              {totalSaved > 0 && (
-                <span className="br-vocab-count">{totalSaved}</span>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {bookText && (
-          <div className="br-progress-bar">
-            <div
-              className="br-progress-fill"
-              style={{ width: `${totalProgress}%` }}
-            />
-          </div>
-        )}
+        <ReaderToolbar
+          preferences={preferences}
+          onPreferencesChange={setPreferences}
+          open={settingsOpen}
+          onToggleOpen={() => setSettingsOpen((open) => !open)}
+        />
 
         <div className="br-body" ref={bodyRef}>
           {chapters.length > 0 && bookText && (
@@ -1783,65 +3436,80 @@ export default function BookReader({
               </div>
 
               <h1 className="chapter-title">
-                {chapters[chapterIndex]?.title}
+                {book?.title || chapters[chapterIndex]?.title}
               </h1>
+
+              <p className="chapter-author">
+                {book?.authors?.trim() || "Unknown author"}
+              </p>
             </div>
           )}
 
           {bookText ? (
             <div className="br-text">
-              {pageTokens.map((part, i) => {
-                const isWord = /^[a-zA-Z']+$/.test(part);
+              {pageParagraphs.map((paragraph) => (
+                <p key={paragraph.id} className="reader-paragraph">
+                  {paragraph.tokens.map((part, i) => {
+                    const isWord = /^[a-zA-Z']+$/.test(part);
 
-                if (!isWord) {
-                  return <span key={i}>{part}</span>;
-                }
+                    if (!isWord) {
+                      return <span key={`${paragraph.id}-${i}`}>{part}</span>;
+                    }
 
-                const key = cleanWord(part).toLowerCase();
-                const isActive = key === highlightedWord;
-                const savedEntry = savedWords.find((word) => word.key === key);
+                    const key = cleanWord(part).toLowerCase();
+                    const isActive = key === highlightedWord;
+                    const savedEntry = savedWords.find((word) => word.key === key);
+                    const isMemorized = savedEntry?.status === "memorized";
 
-                return (
-                  <span
-                    key={i}
-                    data-word-btn
-                    role="button"
-                    tabIndex={0}
-                    className={`word-btn${isActive ? " active" : ""}${
-                      savedEntry?.mastered
-                        ? " mastered"
-                        : savedEntry
-                          ? " saved"
-                          : ""
-                    }`}
-                    onClick={(e) => handleWordClick(e, part)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        handleWordClick(
-                          e as unknown as ReactMouseEvent<HTMLElement>,
-                          part
-                        );
-                      }
-                    }}
-                  >
-                    {part}
-                  </span>
-                );
-              })}
+                    return (
+                      <span
+                        key={`${paragraph.id}-${i}`}
+                        data-word-btn
+                        role="button"
+                        tabIndex={0}
+                        className={`word-btn${isActive ? " active" : ""}${
+                          isMemorized
+                            ? " mastered"
+                            : savedEntry
+                              ? " saved"
+                              : ""
+                        }`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleWordClick(part);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            void handleWordClick(part);
+                          }
+                        }}
+                      >
+                        {part}
+                      </span>
+                    );
+                  })}
+                </p>
+              ))}
             </div>
           ) : (
             <div className="empty-book-box">
               <div className="empty-book-icon">📚</div>
 
               <h2 className="empty-book-title">
-                {bookId ? "Ном ачаалж байна..." : "Ном import хийгээгүй байна"}
+                {loadError
+                  ? "Ном нээгдсэнгүй"
+                  : bookId
+                    ? "Ном ачаалж байна..."
+                    : "Унших ном сонгоогүй байна"}
               </h2>
 
               <p className="empty-book-text">
-                {bookId
-                  ? "Номын текстийг татаж байна. Түр хүлээнэ үү."
-                  : ".txt хэлбэртэй English ном оруулаад үгэн дээр дарж AI тайлбар, орчуулга, жишээ өгүүлбэр харна."}
+                {loadError
+                  ? "Номын сан руу буцаад өөр ном сонгох эсвэл өөрийн файл import хийгээрэй."
+                  : bookId
+                    ? "Номын текстийг татаж байна. Түр хүлээнэ үү."
+                    : "PDF, EPUB, DOCX эсвэл TXT номоо import хийгээд үгэн дээр дарж AI тайлбар, орчуулга харна."}
               </p>
 
               {loadError && <p className="empty-book-error">{loadError}</p>}
@@ -1863,6 +3531,14 @@ export default function BookReader({
                   </Link>
                 </div>
               )}
+
+              {bookId && loadError && (
+                <div className="empty-book-actions">
+                  <Link className="import-main-btn" href="/?view=library">
+                    Номын сан руу буцах
+                  </Link>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1880,7 +3556,8 @@ export default function BookReader({
                 }
               }}
             >
-              ← Өмнөх
+              <ChevronLeft size={17} />
+              Өмнөх
             </button>
 
             <div className="br-page-info">
@@ -1900,68 +3577,76 @@ export default function BookReader({
                 }
               }}
             >
-              Дараах →
+              Дараах
+              <ChevronRight size={17} />
             </button>
           </div>
         )}
-      </div>
+      </ReaderShell>
 
       {popup.visible && (
         <div
           ref={popupRef}
           className="popup"
-          style={{
-            position: "fixed",
-            width: 390,
-            zIndex: 9999,
-            ...getPopupStyle(),
-          }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${selectedWord || "Үг"} тайлбар`}
         >
-          <button className="close-btn" onClick={closePopup}>
+          <button
+            className="close-btn"
+            onClick={closePopup}
+            aria-label="Тайлбар хаах"
+          >
             ×
           </button>
 
           {loading ? (
-            <div style={{ padding: "20px 18px 22px" }}>
+            <div className="ai-loading">
+              <div className="popup-topline">Үгийн тайлбар</div>
               <p className="popup-word">{selectedWord}</p>
 
-              <div
-                style={{
-                  marginTop: 16,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                }}
-              >
+              <div className="ai-loading-head">
+                <span className="ai-skeleton-line mid" />
+                <span className="ai-skeleton-line" />
+                <span className="ai-skeleton-line short" />
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div className="loading-dots">
                   <span />
                   <span />
                   <span />
                 </div>
 
-                <span style={{ fontSize: "0.8rem", color: "#111111" }}>
+                <span style={{ fontSize: "0.8rem", color: "var(--ink-light)" }}>
                   Тайлбарлаж байна...
                 </span>
               </div>
             </div>
           ) : apiError ? (
-            <div style={{ padding: "20px 18px" }}>
-              <p style={{ fontSize: "0.85rem", color: "#c0392b" }}>
-                {apiError}
-              </p>
+            <div className="ai-error-state">
+              <div className="popup-topline">Үгийн тайлбар</div>
+              <p className="popup-word">{selectedWord}</p>
+              <p className="ai-error-title">Тайлбар авч чадсангүй</p>
+              <p className="ai-error-text">{apiError}</p>
+              <div className="ai-error-actions">
+                <button
+                  className="ai-retry-btn"
+                  onClick={() => selectedWord && explainWord(selectedWord)}
+                >
+                  Дахин оролдох
+                </button>
+                <button className="listen-word-btn" onClick={closePopup}>
+                  Хаах
+                </button>
+              </div>
             </div>
           ) : wordData ? (
             <>
               <div className="popup-header">
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    justifyContent: "space-between",
-                    paddingRight: 32,
-                  }}
-                >
+                <div className="popup-title-row">
                   <div>
+                    <div className="popup-topline">Сонгосон үг</div>
                     <p className="popup-word">{wordData.word}</p>
 
                     {wordData.base_form &&
@@ -1974,19 +3659,24 @@ export default function BookReader({
                     )}
                   </div>
 
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "flex-end",
-                      gap: 4,
-                      marginTop: 2,
-                    }}
+                  <button
+                    className="listen-word-btn word-sheet-listen"
+                    onClick={() => listenToWord(wordData.word)}
+                    aria-label={`${wordData.word} сонсох`}
+                    title="Сонсох"
                   >
+                    <Headphones size={17} />
+                  </button>
+                </div>
+
+                <div className="popup-badges">
+                  {wordData.word_type && (
                     <span className="badge badge-type">
                       {wordData.word_type}
                     </span>
+                  )}
 
+                  {wordData.difficulty && (
                     <span
                       className="badge"
                       style={{
@@ -2000,133 +3690,150 @@ export default function BookReader({
                     >
                       {wordData.difficulty}
                     </span>
+                  )}
 
-                    {fromCache && (
-                      <span className="badge badge-cache">⚡ cached</span>
-                    )}
-                  </div>
+                  {fromCache && (
+                    <span className="badge badge-cache">Cached</span>
+                  )}
                 </div>
 
-                <button
-                  className={`save-word-btn${isWordSaved ? " saved" : ""}`}
-                  onClick={() => !isWordSaved && saveWord(wordData)}
-                >
-                  {isWordSaved
-                    ? "✓ Үгийн санд нэмэгдсэн"
-                    : "+ Үгийн санд нэмэх"}
-                </button>
-
-                <div className="tabs">
+                <div className="word-sheet-actions">
                   <button
-                    className={`tab-btn${
-                      activeTab === "meaning" ? " active" : ""
-                    }`}
-                    onClick={() => setActiveTab("meaning")}
+                    className={`save-word-btn${isWordSaved ? " saved" : ""}`}
+                    onClick={() => !isWordSaved && saveWord(wordData)}
                   >
-                    Орчуулга
+                    {isWordSaved ? "Үгийн санд хадгалсан" : "Үгийн санд хадгалах"}
                   </button>
 
-                  <button
-                    className={`tab-btn${
-                      activeTab === "grammar" ? " active" : ""
-                    }`}
-                    onClick={() => setActiveTab("grammar")}
-                    style={{ opacity: hasGrammar ? 1 : 0.45 }}
-                  >
-                    Дүрэм
-                    {hasGrammar && <span className="tab-badge" />}
-                  </button>
+                  {currentSavedWord && (
+                    <button
+                      className="listen-word-btn"
+                      onClick={() => toggleMastered(currentSavedWord.key)}
+                    >
+                      {currentSavedWord.status === "memorized"
+                        ? "Цээжлээгүй болгох"
+                        : "Цээжилсэн болгох"}
+                    </button>
+                  )}
 
                   <button
-                    className={`tab-btn${
-                      activeTab === "phrases" ? " active" : ""
-                    }`}
-                    onClick={() => setActiveTab("phrases")}
-                    style={{ opacity: hasPhrases ? 1 : 0.45 }}
+                    className="listen-word-btn"
+                    onClick={() => listenToWord(wordData.word)}
                   >
-                    Хэллэг
-                    {hasPhrases && <span className="tab-badge" />}
+                    <Headphones size={15} />
+                    Сонсох
                   </button>
                 </div>
               </div>
 
               <div className="popup-body">
-                {activeTab === "meaning" && (
-                  <>
-                    <div className="section">
-                      <p className="label">Үндсэн орчуулга</p>
+                <div className="explanation-stack">
+                  {wordData.mongolian_explanation && (
+                    <section className="explain-card featured">
+                      <div className="explain-card-head">
+                        <h3 className="explain-card-title">Энгийн тайлбар</h3>
+                      </div>
+                      <p className="explain-card-text primary">
+                        {wordData.mongolian_explanation}
+                      </p>
+                    </section>
+                  )}
 
-                      <p className="primary-trans">
+                  <section className="explain-card">
+                    <div className="explain-card-head">
+                      <h3 className="explain-card-title">Орчуулга</h3>
+                    </div>
+                    {wordData.primary_translation ? (
+                      <p className="translation-main">
                         {wordData.primary_translation}
                       </p>
-                    </div>
+                    ) : (
+                      <p className="sheet-empty-note">Орчуулга олдсонгүй.</p>
+                    )}
 
-                    {(wordData.all_translations?.length ?? 0) > 1 && (
-                      <div className="section">
-                        <p className="label">Бүх орчуулга</p>
+                    {(wordData.all_translations?.length ?? 0) > 0 && (
+                      <div className="translation-chips">
+                        {wordData.all_translations
+                          .filter((translation) => translation.mongolian)
+                          .slice(0, 6)
+                          .map((translation, index) => (
+                            <span key={index} className="translation-chip">
+                              {translation.mongolian}
+                              {translation.usage_context
+                                ? ` · ${translation.usage_context}`
+                                : ""}
+                            </span>
+                          ))}
+                      </div>
+                    )}
+                  </section>
 
-                        <div style={{ marginTop: 4 }}>
-                          {wordData.all_translations.map(
-                            (
-                              translation: {
-                                mongolian: ReactNode;
-                                english_sense: ReactNode;
-                                usage_context: ReactNode;
-                              },
-                              index: Key | null | undefined
-                            ) => (
-                              <div key={index} className="trans-row">
-                                <span className="trans-mn">
-                                  {translation.mongolian}
-                                </span>
+                  {(wordData.example_sentence_en || wordData.example_sentence_mn) && (
+                    <section className="explain-card">
+                      <div className="explain-card-head">
+                        <h3 className="explain-card-title">Жишээ өгүүлбэр</h3>
+                        {wordData.example_sentence_en && (
+                          <button
+                            className="listen-word-btn word-sheet-listen"
+                            onClick={() => listenToWord(wordData.example_sentence_en)}
+                            aria-label="Жишээ өгүүлбэр сонсох"
+                            title="Сонсох"
+                          >
+                            <Headphones size={16} />
+                          </button>
+                        )}
+                      </div>
 
-                                <span className="trans-en">
-                                  {translation.english_sense}
-                                </span>
+                      <div className="example-card-row">
+                        <div className="example-card-copy">
+                          {wordData.example_sentence_en && (
+                            <p className="example-en">
+                              &quot;{wordData.example_sentence_en}&quot;
+                            </p>
+                          )}
 
-                                {translation.usage_context && (
-                                  <span className="trans-ctx">
-                                    {translation.usage_context}
-                                  </span>
-                                )}
-                              </div>
-                            )
+                          {wordData.example_sentence_mn && (
+                            <p className="example-mn">
+                              {wordData.example_sentence_mn}
+                            </p>
                           )}
                         </div>
                       </div>
-                    )}
+                    </section>
+                  )}
 
-                    <hr className="divider" />
+                  {memoryTip && (
+                    <section className="explain-card">
+                      <div className="explain-card-head">
+                        <h3 className="explain-card-title">Санах арга</h3>
+                      </div>
 
-                    <div className="section">
-                      <p className="label">Монгол тайлбар</p>
+                      <p className="explain-card-text">{memoryTip}</p>
+                    </section>
+                  )}
 
-                      <p
-                        style={{
-                          fontSize: "0.88rem",
-                          color: "#111111",
-                          lineHeight: 1.6,
-                        }}
-                      >
-                        {wordData.mongolian_explanation}
-                      </p>
-                    </div>
+                  {similarWords.length > 0 && (
+                    <section className="explain-card">
+                      <div className="explain-card-head">
+                        <h3 className="explain-card-title">Ижил төстэй үгс</h3>
+                      </div>
 
-                    <div className="example-box">
-                      <p className="example-en">
-                        &quot;{wordData.example_sentence_en}&quot;
-                      </p>
+                      <div className="similar-chips">
+                        {similarWords.slice(0, 8).map((similarWord, index) => (
+                          <span key={index} className="similar-chip">
+                            {similarWord}
+                          </span>
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-                      <p className="example-mn">
-                        {wordData.example_sentence_mn}
-                      </p>
-                    </div>
-                  </>
-                )}
+                  {hasGrammar && (
+                    <section className="explain-card">
+                      <div className="explain-card-head">
+                        <h3 className="explain-card-title">Дүрмийн тэмдэглэл</h3>
+                      </div>
 
-                {activeTab === "grammar" &&
-                  (hasGrammar ? (
-                    <>
                       <div className="grammar-box">
                         <span className="grammar-form">
                           {FORM_LABELS[wordData.inflection!.form!] ??
@@ -2147,81 +3854,45 @@ export default function BookReader({
                           </p>
                         )}
                       </div>
+                    </section>
+                  )}
 
-                      <div className="section">
-                        <p className="label">English Meaning</p>
-
-                        <p
-                          style={{
-                            fontSize: "0.88rem",
-                            color: "#111111",
-                            lineHeight: 1.6,
-                          }}
-                        >
-                          {wordData.simple_english_meaning}
-                        </p>
+                  {hasPhrases && (
+                    <section className="explain-card">
+                      <div className="explain-card-head">
+                        <h3 className="explain-card-title">Хэллэг</h3>
                       </div>
-                    </>
-                  ) : (
-                    <div
-                      style={{
-                        textAlign: "center",
-                        padding: "24px 0",
-                        color: "#111111",
-                      }}
-                    >
-                      <p style={{ fontSize: "1.5rem", marginBottom: 8 }}>
-                        📖
-                      </p>
 
-                      <p style={{ fontSize: "0.85rem" }}>
-                        <strong>{wordData.word}</strong> нь хувираагүй үндсэн
-                        хэлбэр юм.
-                      </p>
-                    </div>
-                  ))}
+                      <div className="explanation-stack">
+                        {wordData.phrases.slice(0, 6).map((phrase, index) => (
+                          <div key={index} className="phrase-card">
+                            <p className="phrase-text">{phrase.phrase}</p>
+                            <p className="phrase-trans">{phrase.translation}</p>
+                            {phrase.example_en && (
+                              <p className="phrase-ex-en">
+                                &quot;{phrase.example_en}&quot;
+                              </p>
+                            )}
+                            {phrase.example_mn && (
+                              <p className="phrase-ex-mn">{phrase.example_mn}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
-                {activeTab === "phrases" &&
-                  (hasPhrases ? (
-                    wordData.phrases.map(
-                      (
-                        phrase: {
-                          phrase: ReactNode;
-                          translation: ReactNode;
-                          example_en: ReactNode;
-                          example_mn: ReactNode;
-                        },
-                        index: Key | null | undefined
-                      ) => (
-                        <div key={index} className="phrase-card">
-                          <p className="phrase-text">{phrase.phrase}</p>
-                          <p className="phrase-trans">
-                            {phrase.translation}
-                          </p>
-                          <p className="phrase-ex-en">
-                            &quot;{phrase.example_en}&quot;
-                          </p>
-                          <p className="phrase-ex-mn">
-                            {phrase.example_mn}
-                          </p>
-                        </div>
-                      )
-                    )
-                  ) : (
-                    <div
-                      style={{
-                        textAlign: "center",
-                        padding: "24px 0",
-                        color: "#111111",
-                      }}
-                    >
-                      <p style={{ fontSize: "1.5rem", marginBottom: 8 }}>
-                        🔍
+                  {(book?.title || chapters[chapterIndex]?.title) && (
+                    <section className="explain-card">
+                      <div className="explain-card-head">
+                        <h3 className="explain-card-title">Эх сурвалж</h3>
+                      </div>
+                      <p className="popup-source">
+                        {book?.title ?? chapters[chapterIndex]?.title}
                       </p>
-
-                      <p style={{ fontSize: "0.85rem" }}>Хэллэг олдсонгүй.</p>
-                    </div>
-                  ))}
+                    </section>
+                  )}
+                </div>
               </div>
             </>
           ) : null}
@@ -2280,43 +3951,50 @@ export default function BookReader({
                   </p>
                 </div>
               ) : (
-                savedWords.map((word) => (
-                  <div
-                    key={word.key}
-                    className={`vocab-item${
-                      word.mastered ? " mastered" : ""
-                    }`}
-                  >
-                    <button
-                      className={`vocab-check-btn${
-                        word.mastered ? " mastered" : ""
-                      }`}
-                      onClick={() => toggleMastered(word.key)}
-                      title={
-                        word.mastered
-                          ? "Цээжилсэн болсон"
-                          : "Цээжилсэн тэмдэглэх"
-                      }
-                    >
-                      {word.mastered ? "✓" : "○"}
-                    </button>
+                savedWords.map((word) => {
+                  const isMemorized = word.status === "memorized";
 
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="vocab-item-word">{word.word}</div>
-                      <div className="vocab-item-trans">
-                        {word.translation}
+                  return (
+                    <div
+                      key={word.key}
+                      className={`vocab-item${isMemorized ? " mastered" : ""}`}
+                    >
+                      <button
+                        className={`vocab-check-btn${
+                          isMemorized ? " mastered" : ""
+                        }`}
+                        onClick={() => toggleMastered(word.key)}
+                        title={
+                          isMemorized
+                            ? "Цээжлээгүй болгох"
+                            : "Цээжилсэн болгох"
+                        }
+                      >
+                        {isMemorized ? "✓" : "○"}
+                      </button>
+
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div className="vocab-item-word">{word.word}</div>
+                        <div className="vocab-item-trans">
+                          {word.meaning || word.translation || "Тайлбар хадгалагдсан"}
+                        </div>
+                        {word.sourceBookTitle && (
+                          <div className="vocab-item-source">
+                            Ном: {word.sourceBookTitle}
+                          </div>
+                        )}
                       </div>
-                    </div>
 
-                    <button
-                      className="vocab-remove-btn"
-                      onClick={() => removeWord(word.key)}
-                      title="Устгах"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))
+                      <button
+                        className="vocab-remove-btn"
+                        onClick={() => removeWord(word.key)}
+                        title="Жагсаалтаас хасах"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>

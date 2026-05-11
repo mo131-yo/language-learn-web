@@ -5,15 +5,18 @@ import {
   Bell,
   BookOpen,
   Home,
+  Menu,
   Notebook,
+  Palette,
   Plus,
-  ShoppingBag,
   Star,
   Trophy,
   User,
+  X,
 } from "lucide-react";
 import {
   FormEvent,
+  type ReactNode,
   startTransition,
   useCallback,
   useEffect,
@@ -32,6 +35,10 @@ import type {
 } from "@/lib/types";
 import { urlBase64ToUint8Array } from "@/lib/client-push";
 import { themes, getCSSVariables, type ThemeMode } from "@/lib/themes";
+import {
+  normalizeExplainedWords,
+  type ExplainedWordEntry,
+} from "@/lib/vocabulary";
 import { AuthModal } from "./AuthModal";
 import { StreakRankPetCard } from "./StreakRankPet";
 import { RANK_PETS } from "./StreakRankPet";
@@ -72,13 +79,15 @@ const DEFAULT_VOCAB_REMINDER_SETTINGS: VocabReminderSettings = {
 
 type Mode = "flashcard" | "quiz" | "check";
 
+type VocabularyFilter = "all" | "learning" | "memorized" | "ai";
+
 type View =
   | "home"
   | "learn"
   | "add-word"
   | "categories"
   | "challenges"
-  | "shop"
+  | "themes"
   | "leaderboard"
   | "profile"
   | "library"
@@ -139,26 +148,6 @@ const PALETTE = [
   "#f97316",
 ];
 
-const THEME_PRICES: Record<ThemeMode, number> = {
-  light: 0,
-  dark: 0,
-  ocean: 500,
-  violet: 500,
-  sunset: 500,
-  spring: 800,
-  summer: 800,
-  autumn: 800,
-  winter: 800,
-  aurora: 800,
-};
-
-function calculateThemeSpend(themeKeys: ThemeMode[]) {
-  return Array.from(new Set(themeKeys)).reduce(
-    (total, themeKey) => total + (THEME_PRICES[themeKey] ?? 0),
-    0
-  );
-}
-
 const TITLE_LEVELS = [
   { title: "Анхан сурагч", xp: 0 },
   { title: "Шинэ сурагч", xp: 100 },
@@ -214,6 +203,19 @@ const THEME_PREVIEWS: Partial<
   autumn: { bg: "#fff7ed", card: "#ffedd5", primary: "#ea580c", text: "#2f1b0c", accent: "#b45309" },
   winter: { bg: "#eef7ff", card: "#ffffff", primary: "#0ea5e9", text: "#0f2638", accent: "#38bdf8" },
   aurora: { bg: "#f5fffd", card: "#ffffff", primary: "#14b8a6", text: "#112b2b", accent: "#8b5cf6" },
+};
+
+const THEME_DISPLAY_NAMES: Record<ThemeMode, string> = {
+  light: "Classic Green",
+  dark: "Night Study",
+  ocean: "Ocean Blue",
+  violet: "Lavender",
+  sunset: "Warm Paper",
+  spring: "Forest",
+  summer: "Minimal White",
+  autumn: "Autumn",
+  winter: "Winter",
+  aurora: "Sakura",
 };
 
 
@@ -276,14 +278,10 @@ function formatLastActive(lastActiveAt?: number | null): string {
 function ThemePreviewCard({
   themeKey,
   isActive,
-  isOwned,
-  price,
   onClick,
 }: {
   themeKey: ThemeMode;
   isActive: boolean;
-  isOwned: boolean;
-  price: number;
   onClick: () => void;
 }) {
   const p =
@@ -296,7 +294,7 @@ function ThemePreviewCard({
       accent: "#f59e0b",
     };
 
-  const themeName = themes[themeKey]?.name ?? themeKey;
+  const themeName = THEME_DISPLAY_NAMES[themeKey] ?? themes[themeKey]?.name ?? themeKey;
 
   return (
     <button
@@ -312,7 +310,6 @@ function ThemePreviewCard({
           boxShadow: isActive
             ? `0 0 0 3px ${p.primary}33`
             : "0 2px 8px rgba(0,0,0,0.12)",
-          opacity: isOwned ? 1 : 0.72,
         }}
       >
         <svg
@@ -346,7 +343,6 @@ function ThemePreviewCard({
         style={{ color: isActive ? p.primary : "var(--text-secondary, #6b7280)" }}
       >
         {themeName}
-        {!isOwned ? ` 🔒 ${price} XP` : ""}
         {isActive ? " ✓" : ""}
       </div>
     </button>
@@ -1290,6 +1286,8 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [leaderboard, setLeaderboard] = useState(initialData.leaderboard);
 
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [vocabSearch, setVocabSearch] = useState("");
+  const [vocabFilter, setVocabFilter] = useState<VocabularyFilter>("all");
   const [mode, setMode] = useState<Mode>("flashcard");
   const [cardIndex, setCardIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
@@ -1326,8 +1324,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [themePickerOpen, setThemePickerOpen] = useState(false);
-  const [ownedThemes, setOwnedThemes] = useState<ThemeMode[]>(["light", "dark"]);
-  const [spentThemeXp, setSpentThemeXp] = useState(0);
 
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -1342,6 +1338,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [vocabReminderSettings, setVocabReminderSettings] =
     useState<VocabReminderSettings>(DEFAULT_VOCAB_REMINDER_SETTINGS);
   const [vocabReminderStatus, setVocabReminderStatus] = useState("Мэдэгдэл хаалттай байна");
+  const [aiExplainedWords, setAiExplainedWords] = useState<ExplainedWordEntry[]>([]);
 
   // Social state
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
@@ -1358,6 +1355,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({});
   const [chatInput, setChatInput] = useState("");
   const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeChatUserId, setActiveChatUserId] = useState<string | null>(null);
   const [chatReadState, setChatReadState] = useState<Record<string, number>>({});
   const [lastActiveMap, setLastActiveMap] = useState<Record<string, number>>({});
@@ -1372,7 +1370,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const addWordCategoryMenuRef = useRef<HTMLDivElement>(null);
 
   const cssVars = getCSSVariables(theme);
-  const userThemeStorageKey = `words-theme-shop:${authUser?.id ?? "guest"}`;
   const friendRequestsStorageKey = `words-friends:${authUser?.id ?? "guest"}`;
   const heartsStorageKey = `words-hearts:${authUser?.id ?? "guest"}`;
   const chatStorageKey = `words-chat:${authUser?.id ?? "guest"}`;
@@ -1380,6 +1377,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const chatReadStorageKey = `words-chat-read:${authUser?.id ?? "guest"}`;
   const lastActiveStorageKey = "words-last-active";
   const vocabReminderStorageKey = `words-vocab-reminders:${authUser?.id ?? "guest"}`;
+  const aiExplainedStorageKey = "ai-explained-words";
 
   const saveDbState = useCallback((key: string, value: unknown) => {
     fetch("/api/user-state", {
@@ -1423,6 +1421,11 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     setXpEvents((prev) => prev.filter((e) => e.id !== id));
   }
 
+  function openThemesView() {
+    setView("themes");
+    window.history.pushState(null, "", "/?view=themes");
+  }
+
   useEffect(() => {
   const params = new URLSearchParams(window.location.search);
   const viewParam = params.get("view");
@@ -1433,13 +1436,14 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     viewParam === "add-word" ||
     viewParam === "categories" ||
     viewParam === "challenges" ||
+    viewParam === "themes" ||
     viewParam === "shop" ||
     viewParam === "leaderboard" ||
     viewParam === "profile" ||
     viewParam === "library" ||
     viewParam === "reader"
   ) {
-    setView(viewParam);
+    setView(viewParam === "shop" ? "themes" : viewParam);
   }
 }, []);
 
@@ -1526,45 +1530,24 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           localStorage.setItem(vocabReminderStorageKey, JSON.stringify(nextSettings));
         }
 
+        const explainedWords = normalizeExplainedWords(state[aiExplainedStorageKey]);
+
+        if (
+          explainedWords.length > 0 ||
+          Array.isArray(state[aiExplainedStorageKey])
+        ) {
+          setAiExplainedWords(explainedWords);
+          localStorage.setItem(aiExplainedStorageKey, JSON.stringify(explainedWords));
+        }
+
         if (state["last-active"] && typeof state["last-active"] === "object") {
           setLastActiveMap(state["last-active"] as Record<string, number>);
           localStorage.setItem(lastActiveStorageKey, JSON.stringify(state["last-active"]));
         }
 
-        if (
-          state["theme-shop"] &&
-          typeof state["theme-shop"] === "object"
-        ) {
-          const shopState = state["theme-shop"] as {
-            ownedThemes?: unknown;
-            spentThemeXp?: unknown;
-          };
-          const nextOwnedThemes = Array.from(
-            new Set([
-              "light",
-              "dark",
-              ...(Array.isArray(shopState.ownedThemes)
-                ? shopState.ownedThemes.filter(
-                    (item): item is ThemeMode =>
-                      typeof item === "string" && item in themes
-                  )
-                : []),
-            ])
-          ) as ThemeMode[];
-
-          setOwnedThemes(nextOwnedThemes);
-          setSpentThemeXp(calculateThemeSpend(nextOwnedThemes));
-          localStorage.setItem(
-            userThemeStorageKey,
-            JSON.stringify({
-              ownedThemes: nextOwnedThemes,
-              spentThemeXp: calculateThemeSpend(nextOwnedThemes),
-            })
-          );
-        }
-
         if (typeof state.theme === "string" && state.theme in themes) {
           setTheme(state.theme as ThemeMode);
+          localStorage.setItem("words:selected-theme", state.theme);
           localStorage.setItem("words-theme", state.theme);
         }
 
@@ -1588,10 +1571,10 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     chatStorageKey,
     friendRequestsStorageKey,
     heartsStorageKey,
+    aiExplainedStorageKey,
     lastActiveStorageKey,
     likesStorageKey,
     vocabReminderStorageKey,
-    userThemeStorageKey,
   ]);
 
 
@@ -1599,7 +1582,20 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     const eventSource = new EventSource("/api/sse");
 
     eventSource.addEventListener("word-added", (e) => {
-      const newWord = JSON.parse(e.data) as Word;
+      let newWord: Word | null = null;
+
+      try {
+        const parsed = JSON.parse(e.data) as Partial<Word>;
+
+        if (parsed && typeof parsed.id === "string" && typeof parsed.term === "string") {
+          newWord = parsed as Word;
+        }
+      } catch {
+        return;
+      }
+
+      if (!newWord) return;
+
       setWords((prev) => {
         if (prev.some((w) => w.id === newWord.id)) return prev;
         return [newWord, ...prev];
@@ -1688,6 +1684,13 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     } catch { /* ignore */ }
   }, []);
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(aiExplainedStorageKey);
+      if (saved) setAiExplainedWords(normalizeExplainedWords(JSON.parse(saved)));
+    } catch { /* ignore */ }
+  }, [aiExplainedStorageKey]);
+
 
   useEffect(() => {
     if (!authUser) return;
@@ -1725,57 +1728,36 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   }, [lastActiveMap, lastActiveStorageKey, authUser, userDbStateLoaded, saveDbState]);
 
   useEffect(() => {
+    localStorage.setItem(aiExplainedStorageKey, JSON.stringify(aiExplainedWords));
+    if (authUser && userDbStateLoaded) {
+      saveDbState(aiExplainedStorageKey, aiExplainedWords);
+    }
+  }, [aiExplainedWords, aiExplainedStorageKey, authUser, userDbStateLoaded, saveDbState]);
+
+  useEffect(() => {
     if (!authUser || !userDbStateLoaded) return;
     saveDbState("streak", streak);
   }, [authUser, streak, userDbStateLoaded, saveDbState]);
 
 
   useEffect(() => {
-    const savedShopState = localStorage.getItem(userThemeStorageKey);
-    if (savedShopState) {
-      try {
-        const parsed = JSON.parse(savedShopState) as {
-          ownedThemes?: ThemeMode[];
-          spentThemeXp?: number;
-        };
-        const nextOwnedThemes = Array.from(
-          new Set(["light", "dark", ...(parsed.ownedThemes ?? []).filter((item): item is ThemeMode => item in themes)])
-        ) as ThemeMode[];
-        setOwnedThemes(nextOwnedThemes);
-        setSpentThemeXp(calculateThemeSpend(nextOwnedThemes));
-      } catch {
-        setOwnedThemes(["light", "dark"]);
-        setSpentThemeXp(0);
-      }
-    } else {
-      setOwnedThemes(["light", "dark"]);
-      setSpentThemeXp(0);
-    }
-    const savedTheme = localStorage.getItem("words-theme") as ThemeMode | null;
+    const savedTheme =
+      (localStorage.getItem("words:selected-theme") as ThemeMode | null) ??
+      (localStorage.getItem("words-theme") as ThemeMode | null);
+
     if (savedTheme && savedTheme in themes) {
       setTheme(savedTheme);
+      localStorage.setItem("words:selected-theme", savedTheme);
     } else {
       setTheme("light");
     }
-  }, [userThemeStorageKey]);
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem(
-      userThemeStorageKey,
-      JSON.stringify({ ownedThemes, spentThemeXp })
-    );
-    if (authUser && userDbStateLoaded) {
-      saveDbState("theme-shop", { ownedThemes, spentThemeXp });
-    }
-  }, [ownedThemes, spentThemeXp, userThemeStorageKey, authUser, userDbStateLoaded, saveDbState]);
-
-  useEffect(() => {
-    if (!ownedThemes.includes(theme)) {
-      return;
-    }
+    localStorage.setItem("words:selected-theme", theme);
     localStorage.setItem("words-theme", theme);
     if (authUser && userDbStateLoaded) saveDbState("theme", theme);
-  }, [ownedThemes, theme, authUser, userDbStateLoaded, saveDbState]);
+  }, [theme, authUser, userDbStateLoaded, saveDbState]);
 
 
   useEffect(() => {
@@ -1783,6 +1765,25 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     const t = window.setTimeout(() => setNotice(""), 4000);
     return () => window.clearTimeout(t);
   }, [notice]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMobileNavOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [mobileNavOpen]);
 
 
   useEffect(() => {
@@ -1882,6 +1883,54 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     return words.filter((w) => w.category_id === selectedCategory);
   }, [selectedCategory, words]);
 
+  const savedVocabularyWords = useMemo(() => {
+    if (vocabFilter === "learning") {
+      return filteredWords.filter((word) => word.mastery < 4);
+    }
+
+    if (vocabFilter === "memorized") {
+      return filteredWords.filter((word) => word.mastery >= 4);
+    }
+
+    return filteredWords;
+  }, [filteredWords, vocabFilter]);
+
+  const visibleVocabularyWords = useMemo(() => {
+    const query = vocabSearch.trim().toLowerCase();
+    if (!query) return savedVocabularyWords;
+
+    return savedVocabularyWords.filter((word) => {
+      return (
+        word.term.toLowerCase().includes(query) ||
+        word.meaning.toLowerCase().includes(query) ||
+        word.example.toLowerCase().includes(query) ||
+        (word.category_name ?? "").toLowerCase().includes(query)
+      );
+    });
+  }, [savedVocabularyWords, vocabSearch]);
+
+  const visibleAIExplainedWords = useMemo(() => {
+    const query = vocabSearch.trim().toLowerCase();
+    if (!query) return aiExplainedWords;
+
+    return aiExplainedWords.filter((entry) => {
+      return (
+        entry.word.toLowerCase().includes(query) ||
+        entry.meaning.toLowerCase().includes(query) ||
+        entry.translation.toLowerCase().includes(query) ||
+        entry.example.toLowerCase().includes(query) ||
+        (entry.sourceBookTitle ?? "").toLowerCase().includes(query)
+      );
+    });
+  }, [aiExplainedWords, vocabSearch]);
+
+  const dailyReviewWords = useMemo(() => {
+    return [...words]
+      .filter((word) => word.mastery < 4)
+      .sort((a, b) => a.mastery - b.mastery)
+      .slice(0, 8);
+  }, [words]);
+
   const quizWords = useMemo(() => {
     if (!quizWordIds) return words;
     return quizWordIds
@@ -1923,7 +1972,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const currentTitleLevel = getTitleLevel(xpTotal);
   const nextTitleLevel = getNextTitleLevel(xpTotal);
   const unlockedTitleCount = TITLE_LEVELS.filter((level) => xpTotal >= level.xp).length;
-  const availableThemeXp = Math.max(xpTotal - spentThemeXp, 0);
   const currentRankPet =
     [...RANK_PETS].reverse().find((pet) => xpTotal >= pet.xp) ?? RANK_PETS[0];
   const unlockedRankPetCount = RANK_PETS.filter((pet) => xpTotal >= pet.xp).length;
@@ -1948,6 +1996,108 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const selectedAddWordCategory =
     categories.find((category) => category.id === addWordCategoryId) ?? null;
   const themeKeys = Object.keys(themes) as ThemeMode[];
+  const pageTitleMap: Record<View, string> = {
+    home: "Өнөөдрийн суралцах зам",
+    learn: "Үгийн давталт",
+    "add-word": "Үг нэмэх",
+    categories: "Ангиллууд",
+    challenges: "Сорилт",
+    themes: "Загвар",
+    leaderboard: "Rank",
+    profile: "Профайл",
+    library: "Номын сан",
+    reader: "Уншигч",
+  };
+
+  const navItems: Array<{
+    id: string;
+    label: string;
+    icon: ReactNode;
+    active: boolean;
+    onSelect: () => void;
+  }> = [
+    {
+      id: "home",
+      label: "Нүүр",
+      icon: <Home size={21} strokeWidth={1.8} />,
+      active: view === "home",
+      onSelect: () => setView("home"),
+    },
+    {
+      id: "learn",
+      label: "Сурах",
+      icon: <BookOpen size={21} strokeWidth={1.8} />,
+      active: view === "learn",
+      onSelect: () => openProtectedView("learn"),
+    },
+    {
+      id: "add-word",
+      label: "Нэмэх",
+      icon: <Plus size={24} strokeWidth={2.2} />,
+      active: view === "add-word",
+      onSelect: () => openProtectedView("add-word"),
+    },
+    {
+      id: "challenges",
+      label: "Сорилт",
+      icon: <Award size={21} strokeWidth={1.8} />,
+      active: view === "challenges",
+      onSelect: () => openProtectedView("challenges"),
+    },
+    {
+      id: "library",
+      label: "Ном",
+      icon: <Notebook size={21} strokeWidth={1.8} />,
+      active: view === "library" || view === "reader",
+      onSelect: openLibraryView,
+    },
+    {
+      id: "leaderboard",
+      label: "Rank",
+      icon: <Trophy size={21} strokeWidth={1.8} />,
+      active: view === "leaderboard",
+      onSelect: () => setView("leaderboard"),
+    },
+    {
+      id: "themes",
+      label: "Загвар",
+      icon: <Palette size={21} strokeWidth={1.8} />,
+      active: view === "themes",
+      onSelect: openThemesView,
+    },
+    {
+      id: "profile",
+      label: "Профайл",
+      icon: authUser?.avatar ? (
+        <Image
+          src={authUser.avatar}
+          alt=""
+          width={24}
+          height={24}
+          unoptimized
+          style={{
+            width: 24,
+            height: 24,
+            borderRadius: "50%",
+            objectFit: "cover",
+            border:
+              view === "profile"
+                ? "2px solid var(--primary, #16a34a)"
+                : "2px solid var(--border, #e5e7eb)",
+          }}
+        />
+      ) : (
+        <User size={21} strokeWidth={1.8} />
+      ),
+      active: view === "profile",
+      onSelect: () => openProtectedView("profile"),
+    },
+  ];
+
+  function handleNavSelect(onSelect: () => void) {
+    onSelect();
+    setMobileNavOpen(false);
+  }
 
 
   const pendingRequestsToMe = friendRequests.filter(
@@ -2330,6 +2480,31 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       payload.word,
       ...prev.filter((word) => word.id !== payload.word.id),
     ]);
+  }
+
+  function handleAIWordExplained(entry: ExplainedWordEntry) {
+    setAiExplainedWords((prev) => {
+      const existing = prev.find((word) => word.key === entry.key);
+
+      if (!existing) {
+        return [entry, ...prev];
+      }
+
+      return prev.map((word) =>
+        word.key === entry.key
+          ? {
+              ...word,
+              ...entry,
+              isSaved: word.isSaved || entry.isSaved,
+              explainCount: Math.max(word.explainCount, entry.explainCount),
+              lastExplainedAt: Math.max(
+                word.lastExplainedAt,
+                entry.lastExplainedAt
+              ),
+            }
+          : word
+      );
+    });
   }
 
   async function createCategoryByName(name: string, color?: string) {
@@ -2981,45 +3156,14 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     return `${window.location.origin}?join=${code}`;
   }
 
-  function canUseTheme(themeKey: ThemeMode) {
-    return ownedThemes.includes(themeKey);
-  }
-
   function handleThemeSelect(themeKey: ThemeMode) {
-    if (!canUseTheme(themeKey)) {
-      setThemePickerOpen(false);
-      setView("shop");
-      setNotice("Энэ theme-г Shop-с XP-ээр аваарай");
-      return;
-    }
     setTheme(themeKey);
     setThemePickerOpen(false);
-  }
-
-  function handleBuyTheme(themeKey: ThemeMode) {
-    const price = THEME_PRICES[themeKey];
-    if (canUseTheme(themeKey)) {
-      setTheme(themeKey);
-      setNotice(`${themes[themeKey].name} theme идэвхжлээ`);
-      return;
-    }
-    if (availableThemeXp < price) {
-      setNotice("Theme авахад XP хүрэлцэхгүй байна");
-      return;
-    }
-    setOwnedThemes((prev) => [...prev, themeKey]);
-    setSpentThemeXp((prev) => prev + price);
-    setTheme(themeKey);
-    setNotice(`${themes[themeKey].name} theme худалдаж авлаа`);
+    setNotice(`${THEME_DISPLAY_NAMES[themeKey]} загвар сонгогдлоо`);
   }
 
   function previewTheme(themeKey: ThemeMode) {
-    setTheme(themeKey);
-    if (canUseTheme(themeKey)) {
-      setNotice(`${themes[themeKey].name} theme сонгогдлоо`);
-    } else {
-      setNotice(`${themes[themeKey].name} theme-г түр харж байна. Байнгын ашиглахын тулд худалдаж авна уу.`);
-    }
+    handleThemeSelect(themeKey);
   }
 
   async function shareInviteLink(challenge: Challenge) {
@@ -3234,12 +3378,23 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         .theme-preview-btn { background: none; border: none; padding: 0; cursor: pointer; display: flex; flex-direction: column; gap: 6px; outline: none; }
         .theme-preview-card { width: 100%; border-radius: 12px; overflow: hidden; border: 2px solid transparent; transition: all 0.15s; }
         .theme-preview-name { font-size: 12px; font-weight: 900; text-align: center; letter-spacing: 0.3px; }
-        .shop-grid { display: grid; gap: 14px; margin-top: 16px; }
-        .shop-card { border: 2px solid var(--border, #e5e7eb); border-radius: 20px; background: var(--bg-secondary, #ffffff); padding: 18px; }
-        .shop-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-        .shop-card-name { font-size: 18px; font-weight: 900; color: var(--text, #111827); }
-        .shop-card-price { padding: 8px 12px; border-radius: 999px; background: var(--accent-soft, #fef3c7); color: var(--accent-dark, #d97706); font-size: 12px; font-weight: 900; }
-        .shop-card-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+        .theme-page { max-width: 860px; }
+        .theme-page-head { margin-bottom: 18px; }
+        .theme-card-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: 16px; }
+        .theme-card { border: 2px solid var(--border, #e5e7eb); border-radius: 20px; background: var(--bg-secondary, #ffffff); padding: 18px; transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease; }
+        .theme-card.active { border-color: var(--primary, #16a34a); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary, #16a34a) 12%, transparent); }
+        .theme-card:hover { transform: translateY(-1px); box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08); }
+        .theme-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+        .theme-card-name { font-size: 18px; font-weight: 900; color: var(--text, #111827); }
+        .theme-selected-pill { flex-shrink: 0; padding: 7px 10px; border-radius: 999px; background: var(--primary-soft, #f0fdf4); color: var(--primary, #16a34a); font-size: 11px; font-weight: 900; }
+        .theme-card .primary-btn,
+        .theme-card .secondary-btn { width: 100%; margin-top: 14px; }
+        @media (min-width: 640px) {
+          .theme-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (min-width: 1024px) {
+          .theme-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
         .app-body { flex: 1; overflow-y: auto; padding-bottom: 84px; }
         .page, .form-page, .flashcard-wrap { padding: 20px; max-width: 680px; margin: 0 auto; width: 100%; }
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg-secondary, var(--card, #fff)); border-top: 2px solid var(--border, #e5e7eb); display: flex; z-index: 100; height: 68px; }
@@ -3300,6 +3455,11 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         .ms-dot { width: 8px; height: 8px; border-radius: 50%; }
         .cat-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 16px; scrollbar-width: none; }
         .cat-chips::-webkit-scrollbar { display: none; }
+        .vocab-filter-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 1px 6px; scrollbar-width: none; }
+        .vocab-filter-tabs::-webkit-scrollbar { display: none; }
+        .vocab-filter-tab { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border, #e5e7eb); background: var(--bg-secondary, #fff); color: var(--text-secondary, #6b7280); border-radius: 999px; padding: 9px 12px; font-size: 12px; font-weight: 900; cursor: pointer; white-space: nowrap; }
+        .vocab-filter-tab span { min-width: 22px; height: 22px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; background: rgba(15, 23, 42, 0.06); color: var(--text, #111827); font-size: 11px; }
+        .vocab-filter-tab.active { border-color: color-mix(in srgb, var(--primary, #16a34a) 45%, var(--border, #e5e7eb)); background: var(--primary-soft, #f0fdf4); color: var(--primary, #16a34a); }
         .cat-chip { padding: 7px 14px; border-radius: 100px; border: 2px solid var(--border, #e5e7eb); background: var(--bg-secondary, var(--card, #fff)); color: var(--text-secondary, var(--muted, #6b7280)); font-size: 13px; font-weight: 800; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
         .cat-chip.active { background: var(--primary, #16a34a); border-color: var(--primary, #16a34a); color: #fff; }
         .cat-chip-dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -3326,6 +3486,41 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         .result-bar { margin-top: 12px; padding: 12px 16px; border-radius: 12px; font-size: 15px; font-weight: 800; }
         .result-bar.correct { background: #f0fdf4; color: #16a34a; border: 2px solid #bbf7d0; }
         .result-bar.wrong { background: #fef2f2; color: #dc2626; border: 2px solid #fecaca; }
+        .review-page { display: grid; gap: 16px; }
+        .review-hero { padding: 20px; border: 1px solid var(--ds-line, var(--border, #e5e7eb)); border-radius: 26px; background: linear-gradient(135deg, color-mix(in srgb, var(--primary-soft, #f0fdf4) 72%, #fff), var(--bg-secondary, #fff)); box-shadow: var(--ds-shadow-sm, 0 1px 2px rgba(15,23,42,0.06)); }
+        .review-hero-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+        .review-kicker { color: var(--primary, #16a34a); font-size: 11px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 5px; }
+        .review-title { color: var(--text, #111827); font-size: clamp(24px, 7vw, 34px); font-weight: 950; line-height: 1.05; letter-spacing: -0.04em; }
+        .review-sub { margin-top: 8px; color: var(--text-secondary, #6b7280); font-size: 14px; font-weight: 750; line-height: 1.55; }
+        .review-meter { min-width: 86px; text-align: right; }
+        .review-meter strong { display: block; color: var(--text, #111827); font-size: 30px; line-height: 1; }
+        .review-meter span { color: var(--text-secondary, #6b7280); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.06em; }
+        .review-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .review-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .review-stat { padding: 12px; border: 1px solid var(--border, #e5e7eb); border-radius: 16px; background: var(--bg-secondary, #fff); }
+        .review-stat span { display: block; color: var(--text-secondary, #6b7280); font-size: 11px; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
+        .review-stat strong { display: block; margin-top: 4px; color: var(--text, #111827); font-size: 22px; line-height: 1; }
+        .vocab-toolbar { display: grid; gap: 12px; }
+        .vocab-search { width: 100%; min-height: 46px; border: 1px solid var(--ds-line, var(--border, #e5e7eb)); border-radius: 16px; background: var(--bg-secondary, #fff); color: var(--text, #111827); padding: 12px 15px; font-size: 15px; font-weight: 800; outline: none; box-shadow: none; }
+        .vocab-search:focus { border-color: var(--primary, #16a34a); box-shadow: 0 0 0 4px rgba(22,163,74,0.12); }
+        .word-card.review-word-card { align-items: flex-start; border-width: 1px; border-radius: 20px; background: color-mix(in srgb, var(--bg-secondary, #fff) 94%, transparent); box-shadow: var(--ds-shadow-sm, 0 1px 2px rgba(15,23,42,0.06)); }
+        .word-card.review-word-card:hover { box-shadow: var(--ds-shadow-md, 0 10px 30px rgba(15,23,42,0.08)); }
+        .word-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+        .word-card-status { width: auto; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 999px; background: var(--primary-soft, #f0fdf4); color: var(--primary, #16a34a); font-size: 10px; font-weight: 950; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+        .word-card-example { margin-top: 8px; color: var(--text-secondary, #6b7280); font-size: 13px; font-weight: 650; line-height: 1.55; }
+        .word-card-meta-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+        .word-card-source { color: var(--text-secondary, #6b7280); font-size: 12px; font-weight: 800; }
+        .review-empty { padding: 28px 18px; border: 1px dashed var(--ds-line, var(--border, #e5e7eb)); border-radius: 22px; background: var(--bg-secondary, #fff); text-align: center; color: var(--text-secondary, #6b7280); font-weight: 750; line-height: 1.6; }
+        .review-empty strong { display: block; margin-bottom: 4px; color: var(--text, #111827); font-size: 18px; }
+        @media (max-width: 520px) {
+          .review-hero { padding: 18px; }
+          .review-hero-top { display: grid; }
+          .review-meter { min-width: 0; text-align: left; }
+          .review-actions, .review-stats { grid-template-columns: 1fr; }
+          .word-card.review-word-card { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; }
+          .word-card.review-word-card .word-card-mastery, .word-card.review-word-card .word-card-actions { grid-column: 2; }
+          .word-card-actions { flex-wrap: wrap; }
+        }
         .form-title { font-size: 24px; font-weight: 900; margin-bottom: 6px; color: var(--text, #111827); }
         .form-sub { font-size: 14px; color: var(--text-secondary, var(--muted, #6b7280)); font-weight: 700; margin-bottom: 24px; }
         .form-group { margin-bottom: 16px; }
@@ -4341,10 +4536,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   color: var(--primary-dark, #15803d);
 }
 
-.super-theme-chip.locked {
-  opacity: 0.72;
-}
-
 .super-theme-dot {
   width: 17px;
   height: 17px;
@@ -5282,6 +5473,652 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             height: 40px;
           }
         }
+
+        /* Navigation and responsive shell polish. */
+        .app {
+          min-height: 100dvh;
+          width: 100%;
+          overflow-x: hidden;
+          background:
+            radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--primary, #16a34a) 8%, transparent), transparent 24rem),
+            var(--bg, #f5f5f0);
+        }
+
+        .app-header {
+          height: 62px;
+          padding: 0 max(14px, env(safe-area-inset-left));
+          gap: 10px;
+          border-bottom: 1px solid color-mix(in srgb, var(--border, #e5e7eb) 88%, transparent);
+          background: color-mix(in srgb, var(--bg-secondary, #fff) 88%, transparent);
+          backdrop-filter: blur(18px);
+          box-shadow: 0 8px 28px rgba(15, 23, 42, 0.06);
+        }
+
+        .mobile-menu-btn {
+          width: 38px;
+          height: 38px;
+          flex: 0 0 auto;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid color-mix(in srgb, var(--border, #e5e7eb) 92%, transparent);
+          border-radius: 12px;
+          background: color-mix(in srgb, var(--bg-secondary, #fff) 92%, transparent);
+          color: var(--text, #111827);
+          box-shadow: none;
+        }
+
+        .mobile-drawer-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 240;
+          border: 0;
+          border-radius: 0;
+          padding: 0;
+          background: rgba(15, 23, 42, 0.44);
+          box-shadow: none;
+          cursor: pointer;
+        }
+
+        .mobile-nav-drawer {
+          position: fixed;
+          inset: 0 auto 0 0;
+          z-index: 250;
+          width: min(280px, 80vw);
+          display: flex;
+          flex-direction: column;
+          border-right: 1px solid var(--border, #e5e7eb);
+          background: var(--bg-secondary, #fff);
+          box-shadow: 24px 0 70px rgba(15, 23, 42, 0.22);
+          transform: translateX(-100%);
+          transition: transform 0.2s ease;
+        }
+
+        .mobile-nav-drawer.open {
+          transform: translateX(0);
+        }
+
+        .mobile-drawer-head {
+          min-height: 62px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 12px 14px 10px;
+          border-bottom: 1px solid var(--border, #e5e7eb);
+        }
+
+        .mobile-drawer-brand {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+          color: var(--text, #111827);
+          font-weight: 950;
+        }
+
+        .mobile-drawer-close {
+          width: 38px;
+          height: 38px;
+          flex: 0 0 auto;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 12px;
+          background: var(--bg, #f5f5f0);
+          color: var(--text, #111827);
+          box-shadow: none;
+        }
+
+        .mobile-drawer-nav {
+          display: grid;
+          gap: 6px;
+          padding: 12px;
+          overflow-y: auto;
+        }
+
+        .drawer-nav-btn {
+          width: 100%;
+          min-height: 48px;
+          display: grid;
+          grid-template-columns: 36px minmax(0, 1fr);
+          align-items: center;
+          gap: 10px;
+          padding: 8px 10px;
+          border-radius: 14px;
+          background: transparent;
+          color: var(--text-secondary, #6b7280);
+          box-shadow: none;
+          text-align: left;
+        }
+
+        .drawer-nav-btn.active {
+          background: var(--primary-soft, #f0fdf4);
+          color: var(--primary, #16a34a);
+        }
+
+        .mobile-menu-btn:hover,
+        .mobile-drawer-overlay:hover,
+        .mobile-drawer-close:hover,
+        .drawer-nav-btn:hover {
+          transform: none;
+          box-shadow: none;
+        }
+
+        .drawer-nav-btn:hover {
+          background: var(--primary-soft, #f0fdf4);
+          color: var(--primary, #16a34a);
+        }
+
+        .drawer-nav-icon {
+          width: 36px;
+          height: 32px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          color: inherit;
+        }
+
+        .drawer-nav-label {
+          overflow: hidden;
+          color: inherit;
+          font-size: 14px;
+          font-weight: 900;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .app-header-logo {
+          width: auto;
+          min-width: 0;
+          max-width: min(46vw, 260px);
+          flex: 1 1 auto;
+          padding: 0;
+          border-radius: 999px;
+          color: var(--text, #111827);
+          box-shadow: none;
+        }
+
+        .app-header-logo-mark {
+          border-radius: 10px;
+          box-shadow: 0 8px 20px color-mix(in srgb, var(--primary, #16a34a) 22%, transparent);
+        }
+
+        .app-header-logo-text {
+          display: grid;
+          gap: 1px;
+          min-width: 0;
+          text-align: left;
+        }
+
+        .app-header-logo-name {
+          color: var(--text, #111827);
+          font-size: 18px;
+          font-weight: 950;
+          line-height: 1;
+          letter-spacing: -0.03em;
+        }
+
+        .app-header-page-title {
+          max-width: 38vw;
+          overflow: hidden;
+          color: var(--text-secondary, #6b7280);
+          font-size: 11px;
+          font-weight: 850;
+          line-height: 1.15;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .app-header-right {
+          min-width: 0;
+          flex: 0 0 auto;
+          gap: 8px;
+        }
+
+        .icon-btn,
+        .xp-badge,
+        .streak-pill {
+          border-width: 1px;
+          border-color: color-mix(in srgb, var(--border, #e5e7eb) 92%, transparent);
+          background: color-mix(in srgb, var(--bg-secondary, #fff) 92%, transparent);
+          box-shadow: none;
+        }
+
+        .icon-btn {
+          width: 38px;
+          height: 38px;
+          flex: 0 0 auto;
+        }
+
+        .icon-btn:hover {
+          background: var(--primary-soft, #f0fdf4);
+          color: var(--primary, #16a34a);
+        }
+
+        .xp-badge,
+        .streak-pill {
+          height: 34px;
+          flex: 0 0 auto;
+          padding: 5px 10px;
+          font-size: 12px;
+        }
+
+        .app-body {
+          width: 100%;
+          min-width: 0;
+          overflow-x: hidden;
+          padding-bottom: calc(28px + env(safe-area-inset-bottom));
+        }
+
+        .page,
+        .form-page,
+        .flashcard-wrap {
+          width: 100%;
+          max-width: 760px;
+          margin-inline: auto;
+          padding: 18px 16px calc(34px + env(safe-area-inset-bottom));
+          overflow-x: hidden;
+        }
+
+        .bottom-nav {
+          display: none;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          width: auto;
+          height: calc(68px + env(safe-area-inset-bottom));
+          align-items: center;
+          gap: 2px;
+          padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+          border: 0;
+          border-top: 1px solid color-mix(in srgb, var(--border, #e5e7eb) 88%, transparent);
+          border-radius: 0;
+          background: color-mix(in srgb, var(--bg-secondary, #fff) 94%, transparent);
+          box-shadow: 0 -12px 34px rgba(15, 23, 42, 0.12);
+          backdrop-filter: blur(18px);
+          overflow-x: auto;
+          overflow-y: hidden;
+          scrollbar-width: none;
+          -webkit-overflow-scrolling: touch;
+        }
+
+        .bottom-nav::-webkit-scrollbar {
+          display: none;
+        }
+
+        .nav-btn {
+          height: 52px;
+          flex: 0 0 64px;
+          min-width: 64px;
+          border-radius: 16px;
+          color: var(--text-secondary, #6b7280);
+          transition: background 0.16s ease, color 0.16s ease, transform 0.12s ease;
+        }
+
+        .nav-btn:hover {
+          background: color-mix(in srgb, var(--primary-soft, #f0fdf4) 62%, transparent);
+          color: var(--primary, #16a34a);
+          transform: none;
+          box-shadow: none;
+        }
+
+        .nav-btn.active {
+          background: var(--primary-soft, #f0fdf4);
+          color: var(--primary, #16a34a);
+        }
+
+        .nav-btn.active::after {
+          display: none;
+        }
+
+        .nav-btn-icon {
+          width: 28px;
+          height: 24px;
+          color: inherit;
+        }
+
+        .nav-btn-label {
+          color: inherit;
+          font-size: 9.5px;
+          font-weight: 850;
+          white-space: nowrap;
+        }
+
+        .nav-btn:nth-child(3) {
+          background: transparent;
+          color: var(--primary, #16a34a);
+          transform: none;
+        }
+
+        .nav-btn:nth-child(3).active {
+          background: var(--primary-soft, #f0fdf4);
+        }
+
+        .nav-btn:nth-child(3) .nav-btn-icon {
+          width: 34px;
+          height: 34px;
+          background: var(--primary, #16a34a);
+          box-shadow: 0 8px 18px color-mix(in srgb, var(--primary, #16a34a) 26%, transparent);
+        }
+
+        @media (max-width: 520px) {
+          .app-header {
+            height: 58px;
+            padding-inline: 10px;
+          }
+
+          .app-header-logo-name {
+            font-size: 16px;
+          }
+
+          .app-header-page-title {
+            max-width: 30vw;
+            font-size: 10px;
+          }
+
+          .xp-badge {
+            max-width: 78px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .streak-pill {
+            display: none;
+          }
+
+          .app-header-right {
+            gap: 5px;
+          }
+
+          .icon-btn {
+            width: 34px;
+            height: 34px;
+          }
+
+          .bottom-nav {
+            height: calc(66px + env(safe-area-inset-bottom));
+            padding-inline: 6px;
+          }
+
+          .nav-btn:nth-child(6),
+          .nav-btn:nth-child(7) {
+            display: flex;
+          }
+        }
+
+        @media (min-width: 900px) {
+          .mobile-menu-btn,
+          .mobile-drawer-overlay,
+          .mobile-nav-drawer {
+            display: none;
+          }
+
+          .app {
+            display: grid;
+            grid-template-columns: 92px minmax(0, 1fr);
+            grid-template-rows: 66px minmax(0, 1fr);
+          }
+
+          .app-header {
+            grid-column: 2;
+            grid-row: 1;
+            height: 66px;
+            padding: 0 32px;
+          }
+
+          .app-body {
+            grid-column: 2;
+            grid-row: 2;
+            padding-bottom: 28px;
+            overflow-y: auto;
+          }
+
+          .page,
+          .form-page,
+          .flashcard-wrap {
+            max-width: 840px;
+            padding: 28px 28px 64px;
+          }
+
+          .bottom-nav {
+            top: 0;
+            right: auto;
+            bottom: 0;
+            left: 0;
+            width: 92px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            gap: 8px;
+            padding: 14px 10px;
+            border-width: 0 1px 0 0;
+            border-radius: 0;
+            box-shadow: none;
+            overflow: visible;
+          }
+
+          .nav-btn {
+            width: 100%;
+            height: 64px;
+            flex: 0 0 auto;
+            border-radius: 18px;
+          }
+
+          .nav-btn-label {
+            font-size: 10px;
+          }
+
+          .nav-btn:nth-child(6),
+          .nav-btn:nth-child(7) {
+            display: flex;
+          }
+
+          .nav-btn:nth-child(3) .nav-btn-icon {
+            width: 30px;
+            height: 30px;
+          }
+
+          .rank-shell .app-header,
+          .rank-shell .app-body,
+          .rank-shell .bottom-nav {
+            transform: none;
+          }
+        }
+
+        /* Responsive stability pass: layout-only guards for mobile width and bottom safe areas. */
+        .hero,
+        .card,
+        .stat-tile,
+        .goal-tile,
+        .profile-card,
+        .challenge-card,
+        .cat-tile,
+        .review-hero,
+        .review-stat,
+        .word-card,
+        .big-flashcard,
+        .quiz-banner {
+          max-width: 100%;
+          min-width: 0;
+        }
+
+        .stats-row,
+        .review-stats,
+        .review-actions,
+        .cat-grid,
+        .theme-card-grid,
+        .theme-grid,
+        .action-btns,
+        .card-nav {
+          min-width: 0;
+        }
+
+        .cat-chips,
+        .mode-tabs {
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          overflow-x: auto;
+          overflow-y: hidden;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+        }
+
+        .cat-chips::-webkit-scrollbar,
+        .mode-tabs::-webkit-scrollbar {
+          display: none;
+        }
+
+        .cat-chip,
+        .mode-tab,
+        .primary-btn,
+        .secondary-btn,
+        .warning-btn,
+        .danger-btn,
+        .white-btn,
+        .mini-action-btn {
+          min-width: 0;
+        }
+
+        .cat-chip {
+          flex: 0 0 auto;
+          white-space: nowrap;
+        }
+
+        .word-card-head,
+        .goal-header,
+        .sec-head,
+        .title-card-head,
+        .theme-card-head {
+          min-width: 0;
+        }
+
+        .word-card-term,
+        .word-card-meaning,
+        .word-card-example,
+        .form-title,
+        .form-sub,
+        .hero-title,
+        .hero-sub {
+          overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 899px) {
+          .app {
+            display: flex;
+            flex-direction: column;
+          }
+
+          .app-body {
+            flex: 1 1 auto;
+          }
+
+          .page,
+          .form-page,
+          .flashcard-wrap {
+            max-width: 760px;
+            padding-inline: max(16px, env(safe-area-inset-left));
+            padding-right: max(16px, env(safe-area-inset-right));
+            padding-bottom: 34px;
+          }
+
+          .stats-row,
+          .review-stats,
+          .review-actions,
+          .cat-grid,
+          .theme-card-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .hero-actions,
+          .word-edit-actions,
+          .word-card-actions {
+            flex-wrap: wrap;
+          }
+
+          .mode-tabs {
+            display: flex;
+            gap: 4px;
+            padding: 4px;
+          }
+
+          .mode-tab {
+            flex: 0 0 auto;
+            min-width: max-content;
+            padding-inline: 12px;
+            white-space: nowrap;
+          }
+
+          .floating-chat-btn {
+            right: max(18px, env(safe-area-inset-right));
+            bottom: calc(24px + env(safe-area-inset-bottom));
+            z-index: 140;
+          }
+
+          .chat-drawer {
+            right: 12px;
+            left: 12px;
+            width: auto;
+            bottom: calc(90px + env(safe-area-inset-bottom));
+            max-height: calc(100dvh - 190px);
+          }
+        }
+
+        @media (min-width: 900px) {
+          .floating-chat-btn {
+            right: 24px;
+            bottom: 24px;
+            z-index: 140;
+          }
+
+          .chat-drawer {
+            right: 24px;
+            bottom: 92px;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .page,
+          .form-page,
+          .flashcard-wrap {
+            padding-inline: 12px;
+          }
+
+          .app-header-logo-mark {
+            width: 28px;
+            height: 28px;
+          }
+
+          .app-header-logo {
+            max-width: 42vw;
+            gap: 7px;
+          }
+
+          .xp-badge {
+            max-width: 70px;
+            padding-inline: 8px;
+            font-size: 11px;
+          }
+
+          .nav-btn {
+            flex-basis: 60px;
+            min-width: 60px;
+          }
+
+          .review-hero,
+          .big-flashcard,
+          .card,
+          .word-card,
+          .profile-card,
+          .challenge-card,
+          .goal-tile,
+          .stat-tile {
+            border-radius: 18px;
+          }
+        }
       `}</style>
 
 
@@ -5359,6 +6196,16 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       <div className={`app${view === "leaderboard" ? " rank-shell" : ""}`}>
 
         <header className="app-header">
+          <button
+            type="button"
+            className="mobile-menu-btn"
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="Цэс нээх"
+            aria-expanded={mobileNavOpen}
+          >
+            <Menu size={21} strokeWidth={2} />
+          </button>
+
           <button type="button" onClick={() => setView("home")} className="app-header-logo">
             <Image
               src="/favicon.svg"
@@ -5368,7 +6215,10 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
               priority
               className="app-header-logo-mark"
             />
-            Words<span>.</span>
+            <span className="app-header-logo-text">
+              <span className="app-header-logo-name">Words.</span>
+              <span className="app-header-page-title">{pageTitleMap[view]}</span>
+            </span>
           </button>
           <div className="app-header-right">
             <button
@@ -5408,6 +6258,49 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           </div>
         </header>
 
+        {mobileNavOpen && (
+          <button
+            type="button"
+            className="mobile-drawer-overlay"
+            aria-label="Цэс хаах"
+            onClick={() => setMobileNavOpen(false)}
+          />
+        )}
+
+        <aside
+          className={`mobile-nav-drawer${mobileNavOpen ? " open" : ""}`}
+          aria-hidden={!mobileNavOpen}
+        >
+          <div className="mobile-drawer-head">
+            <div className="mobile-drawer-brand">
+              <Image src="/favicon.svg" alt="" width={28} height={28} />
+              <span>Words.</span>
+            </div>
+            <button
+              type="button"
+              className="mobile-drawer-close"
+              onClick={() => setMobileNavOpen(false)}
+              aria-label="Цэс хаах"
+            >
+              <X size={20} strokeWidth={2} />
+            </button>
+          </div>
+
+          <nav className="mobile-drawer-nav" aria-label="Гол цэс">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`drawer-nav-btn${item.active ? " active" : ""}`}
+                onClick={() => handleNavSelect(item.onSelect)}
+              >
+                <span className="drawer-nav-icon">{item.icon}</span>
+                <span className="drawer-nav-label">{item.label}</span>
+              </button>
+            ))}
+          </nav>
+        </aside>
+
 
         {themePickerOpen && (
           <div className="theme-picker-overlay">
@@ -5422,8 +6315,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                     key={key}
                     themeKey={key}
                     isActive={theme === key}
-                    isOwned={canUseTheme(key)}
-                    price={THEME_PRICES[key]}
                     onClick={() => handleThemeSelect(key)}
                   />
                 ))}
@@ -5517,7 +6408,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                 </div>
                 <StreakRankPetCard
                   lifetimeXp={xpTotal}
-                  spendableXp={availableThemeXp}
+                  spendableXp={xpTotal}
                   streak={streak}
                   longestStreak={streak}
                   onClick={() => openProtectedView("learn")}
@@ -5643,29 +6534,130 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
         {view === "reader" && authUser && (
           <div style={{ padding: 0 }}>
-            <BookReader onBookWordSaved={handleBookWordSaved} />
+            <BookReader
+              onBookWordSaved={handleBookWordSaved}
+              onAIWordExplained={handleAIWordExplained}
+            />
           </div>
         )}
 
 
           {view === "learn" && authUser && (
-            <div className="flashcard-wrap">
-              <div className="cat-chips">
-                <button
-                  className={`cat-chip${selectedCategory === "all" ? " active" : ""}`}
-                  onClick={() => {
-                    setSelectedCategory("all");
-                    setCardIndex(0);
-                    if (mode === "quiz") {
-                      resetQuizSession();
-                    } else {
+            <div className="flashcard-wrap review-page">
+              <section className="review-hero">
+                <div className="review-hero-top">
+                  <div>
+                    <div className="review-kicker">Өдрийн давталт</div>
+                    <div className="review-title">Өнөөдөр {dailyReviewWords.length} үг давтана</div>
+                    <div className="review-sub">
+                      Сул байгаа үгсээ эхэлж давтаад, мэддэг болсон үгээ “Мэдэж байна” гэж тэмдэглээрэй.
+                    </div>
+                  </div>
+                  <div className="review-meter">
+                    <strong>{dailyGoalPct}%</strong>
+                    <span>цээжилсэн</span>
+                  </div>
+                </div>
+
+                <div className="review-actions">
+                  <button
+                    className="primary-btn"
+                    onClick={() => {
+                      setMode("check");
+                      setSelectedCategory("all");
                       resetStudyState();
-                    }
-                  }}
-                >
-                  Бүгд ({words.length})
-                </button>
-                {categories.map((c) => (
+                    }}
+                    disabled={words.length === 0}
+                  >
+                    Өдрийн давталт эхлэх
+                  </button>
+                  <button
+                    className="secondary-btn"
+                    onClick={() => {
+                      setMode("quiz");
+                      resetQuizSession(dailyReviewWords.map((word) => word.id));
+                      setTimeout(() => inputRef.current?.focus(), 100);
+                    }}
+                    disabled={dailyReviewWords.length === 0}
+                  >
+                    Богино quiz
+                  </button>
+                </div>
+              </section>
+
+              <div className="review-stats">
+                <div className="review-stat">
+                  <span>Нийт</span>
+                  <strong>{words.length}</strong>
+                </div>
+                <div className="review-stat">
+                  <span>Сурч байгаа</span>
+                  <strong>{learningCount}</strong>
+                </div>
+                <div className="review-stat">
+                  <span>Цээжилсэн</span>
+                  <strong>{masteredCount}</strong>
+                </div>
+              </div>
+
+              <div className="vocab-toolbar">
+                <input
+                  className="vocab-search"
+                  value={vocabSearch}
+                  onChange={(e) => setVocabSearch(e.target.value)}
+                  placeholder="Хадгалсан үгээ хайх..."
+                />
+
+                <div className="vocab-filter-tabs" aria-label="Үгийн сангийн шүүлтүүр">
+                  {[
+                    { id: "all", label: "Бүгд", count: words.length },
+                    {
+                      id: "learning",
+                      label: "Цээжлээгүй",
+                      count: words.filter((word) => word.mastery < 4).length,
+                    },
+                    {
+                      id: "memorized",
+                      label: "Цээжилсэн",
+                      count: words.filter((word) => word.mastery >= 4).length,
+                    },
+                    {
+                      id: "ai",
+                      label: "AI тайлбарласан",
+                      count: aiExplainedWords.length,
+                    },
+                  ].map((filter) => (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      className={`vocab-filter-tab${
+                        vocabFilter === filter.id ? " active" : ""
+                      }`}
+                      onClick={() => setVocabFilter(filter.id as VocabularyFilter)}
+                    >
+                      {filter.label}
+                      <span>{filter.count}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {vocabFilter !== "ai" && (
+                  <div className="cat-chips">
+                  <button
+                    className={`cat-chip${selectedCategory === "all" ? " active" : ""}`}
+                    onClick={() => {
+                      setSelectedCategory("all");
+                      setCardIndex(0);
+                      if (mode === "quiz") {
+                        resetQuizSession();
+                      } else {
+                        resetStudyState();
+                      }
+                    }}
+                  >
+                    Бүгд ({words.length})
+                  </button>
+                  {categories.map((c) => (
                   <button
                     key={c.id}
                     className={`cat-chip${selectedCategory === c.id ? " active" : ""}`}
@@ -5682,7 +6674,9 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                     <span className="cat-chip-dot" style={{ background: c.color }} />
                     {c.name}
                   </button>
-                ))}
+                  ))}
+                  </div>
+                )}
               </div>
 
               <div className="mode-tabs">
@@ -5727,8 +6721,10 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                     <button className="secondary-btn" onClick={() => { setMode("flashcard"); resetStudyState(); }}>Давталт руу буцах</button>
                   </div>
                 </div>
-              ) : currentWord ? (
+              ) : currentWord || vocabFilter === "ai" || aiExplainedWords.length > 0 ? (
                 <>
+                  {currentWord ? (
+                    <>
                   <div className="big-flashcard" onClick={() => mode === "flashcard" && setRevealed((r) => !r)}>
                     <div className="new-word-tag">WORD</div>
                     {currentWord.category_name && <div className="card-phonetic">{currentWord.category_name}</div>}
@@ -5794,26 +6790,96 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                   {(mode === "flashcard" || (mode === "quiz" && quizResult)) && (
                     <button className="primary-btn" style={{ width: "100%", marginTop: 10 }} onClick={nextCard}>Дараагийн үг →</button>
                   )}
+                    </>
+                  ) : (
+                    <div className="review-empty">
+                      <strong>Хадгалсан давтах үг алга</strong>
+                      AI тайлбарлуулсан үгсээ доорх “AI тайлбарласан” табаас харж болно.
+                    </div>
+                  )}
 
                   <hr className="divider" />
-                  <div className="sec-head"><div className="sec-title">Бүх үгс</div></div>
+                  <div className="sec-head">
+                    <div>
+                      <div className="sec-title">
+                        {vocabFilter === "ai" ? "AI тайлбарлуулсан үгс" : "Хадгалсан үгс"}
+                      </div>
+                      <div className="stat-sub">
+                        {vocabFilter === "ai"
+                          ? `${visibleAIExplainedWords.length} / ${aiExplainedWords.length} үг харагдаж байна`
+                          : `${visibleVocabularyWords.length} / ${savedVocabularyWords.length} үг харагдаж байна`}
+                      </div>
+                    </div>
+                  </div>
                   <div className="word-list">
-                    {filteredWords.map((w) => {
-                      const canEditWord = Boolean(authUser?.id && w.author_id === authUser.id);
-                      const isEditing = editingWordId === w.id;
-
-                      return (
-                        <div key={w.id} className="word-card" style={{ alignItems: "flex-start" }}>
-                          <div className="word-card-icon">📝</div>
+                    {vocabFilter === "ai" ? (
+                      visibleAIExplainedWords.map((entry) => (
+                        <div key={entry.id} className="word-card review-word-card">
+                          <div className="word-card-icon">AI</div>
                           <div className="word-card-body">
-                            <div className="word-card-term">{w.term}</div>
-                            <div className="word-card-meaning">{w.meaning}</div>
-                            {w.author_name && (
-                              <div className="stat-sub" style={{ marginTop: 4 }}>
-                                Нэмсэн: {w.author_name}
+                            <div className="word-card-head">
+                              <div className="word-card-term">{entry.word}</div>
+                              <div className="word-card-status">
+                                {entry.isSaved ? "Хадгалсан" : "Тайлбарлуулсан"}
+                              </div>
+                            </div>
+                            <div className="word-card-meaning">
+                              {entry.meaning || entry.translation || "AI тайлбар хадгалагдсан"}
+                            </div>
+                            {entry.example && (
+                              <div className="word-card-example">
+                                &quot;{entry.example}&quot;
                               </div>
                             )}
+                            <div className="word-card-meta-row">
+                              {entry.sourceBookTitle && (
+                                <span className="word-card-source">
+                                  Ном: {entry.sourceBookTitle}
+                                </span>
+                              )}
+                              <span className="word-card-source">
+                                {entry.explainCount} удаа тайлбарлуулсан
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                    visibleVocabularyWords.map((w) => {
+                      const canEditWord = Boolean(authUser?.id && w.author_id === authUser.id);
+                      const isEditing = editingWordId === w.id;
+                      const isMemorized = w.mastery >= 4;
+                      const statusLabel =
+                        isMemorized
+                          ? "Цээжилсэн"
+                          : w.mastery > 0
+                            ? "Давтаж байна"
+                            : "Шинэ";
 
+                      return (
+                        <div key={w.id} className="word-card review-word-card">
+                          <div className="word-card-icon">📝</div>
+                          <div className="word-card-body">
+                            <div className="word-card-head">
+                              <div className="word-card-term">{w.term}</div>
+                              <div className="word-card-status">{statusLabel}</div>
+                            </div>
+                            <div className="word-card-meaning">{w.meaning}</div>
+                            {w.example && (
+                              <div className="word-card-example">
+                                &quot;{w.example}&quot;
+                              </div>
+                            )}
+                            <div className="word-card-meta-row">
+                              {w.category_name && (
+                                <span className="word-card-source">{w.category_name}</span>
+                              )}
+                              {w.author_name && (
+                                <span className="word-card-source">
+                                  Нэмсэн: {w.author_name}
+                                </span>
+                              )}
+                            </div>
                             {isEditing && (
                               <div className="word-edit-panel">
                                 <input
@@ -5891,8 +6957,21 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                               <div key={i} className="ms-dot" style={{ background: i <= w.mastery ? masteryColor(w.mastery) : "var(--border, #e5e7eb)" }} />
                             ))}
                           </div>
-                          {canEditWord && (
-                            <div className="word-card-actions">
+                          <div className="word-card-actions">
+                            <button
+                              type="button"
+                              className="mini-action-btn"
+                              onClick={() =>
+                                void updateMastery(
+                                  w,
+                                  isMemorized ? -w.mastery : 4 - w.mastery
+                                )
+                              }
+                            >
+                              {isMemorized ? "Цээжлээгүй болгох" : "Цээжилсэн болгох"}
+                            </button>
+                            {canEditWord && (
+                              <>
                               <button
                                 type="button"
                                 className="mini-action-btn"
@@ -5908,11 +6987,43 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                               >
                                 Устгах
                               </button>
-                            </div>
-                          )}
+                              </>
+                            )}
+                          </div>
                         </div>
                       );
-                    })}
+                    })
+                    )}
+                    {vocabFilter !== "ai" && visibleVocabularyWords.length === 0 && savedVocabularyWords.length > 0 && (
+                      <div className="review-empty">
+                        <strong>Хайлтад таарах үг алга</strong>
+                        Өөр үг, утга эсвэл ангиллын нэрээр хайгаад үзээрэй.
+                      </div>
+                    )}
+                    {vocabFilter !== "ai" && savedVocabularyWords.length === 0 && (
+                      <div className="review-empty">
+                        <strong>
+                          {vocabFilter === "memorized"
+                            ? "Цээжилсэн үг алга"
+                            : vocabFilter === "learning"
+                              ? "Цээжлээгүй үг алга"
+                              : "Одоогоор хадгалсан үг алга"}
+                        </strong>
+                        Reader дээрээс эсвэл “Нэмэх” хэсгээс үг хадгалаад өдөр бүр давтаарай.
+                      </div>
+                    )}
+                    {vocabFilter === "ai" && visibleAIExplainedWords.length === 0 && aiExplainedWords.length > 0 && (
+                      <div className="review-empty">
+                        <strong>Хайлтад таарах тайлбар алга</strong>
+                        Өөр үг, утга эсвэл номын нэрээр хайгаад үзээрэй.
+                      </div>
+                    )}
+                    {vocabFilter === "ai" && aiExplainedWords.length === 0 && (
+                      <div className="review-empty">
+                        <strong>AI тайлбарлуулсан үг хараахан алга</strong>
+                        Ном уншиж байхдаа үгэн дээр дарахад тайлбарын түүх энд хадгалагдана.
+                      </div>
+                    )}
                   </div>
                 </>
               ) : (
@@ -6388,46 +7499,44 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
             </div>
           )}
 
-          {/* ══ SHOP ══ */}
-          {view === "shop" && authUser && (
-            <div className="page">
-              <div className="form-title">Theme Shop</div>
-              <div className="form-sub">Green theme үнэгүй. Бусад theme-үүдийг XP-ээр авч нээнэ.</div>
-              <div className="stats-row">
-                <div className="stat-tile">
-                  <div className="stat-label">Зарцуулах XP</div>
-                  <div className="stat-val" style={{ color: "var(--accent, #f59e0b)" }}>{availableThemeXp.toLocaleString()}</div>
-                  <div className="stat-sub">shop-д ашиглах үлдэгдэл</div>
-                </div>
-                <div className="stat-tile">
-                  <div className="stat-label">Зарцуулсан XP</div>
-                  <div className="stat-val" style={{ color: "var(--primary, #16a34a)" }}>{spentThemeXp.toLocaleString()}</div>
-                  <div className="stat-sub">theme unlock-д</div>
+          {view === "themes" && (
+            <div className="page theme-page">
+              <div className="theme-page-head">
+                <div className="form-title">Загвар сонгох</div>
+                <div className="form-sub">
+                  Бүх загвар үнэгүй. Та дуртай загвараа шууд сонгоод ашиглаарай.
                 </div>
               </div>
-              <div className="shop-grid">
+
+              <div className="theme-card-grid">
                 {themeKeys.map((key) => {
-                  const owned = canUseTheme(key);
-                  const price = THEME_PRICES[key];
                   const isActive = theme === key;
+
                   return (
-                    <div key={key} className="shop-card">
-                      <div className="shop-card-head">
+                    <div key={key} className={`theme-card${isActive ? " active" : ""}`}>
+                      <div className="theme-card-head">
                         <div>
-                          <div className="shop-card-name">{themes[key].name}</div>
-                          <div className="stat-sub">{owned ? "Нээгдсэн theme" : price === 0 ? "Үнэгүй default theme" : `${price.toLocaleString()} XP шаардлагатай`}</div>
+                          <div className="theme-card-name">{THEME_DISPLAY_NAMES[key]}</div>
+                          <div className="stat-sub">
+                            {isActive ? "Одоо ашиглаж байна" : "Үнэгүй загвар"}
+                          </div>
                         </div>
-                        <div className="shop-card-price">{price === 0 ? "Free" : `${price.toLocaleString()} XP`}</div>
+                        {isActive && <div className="theme-selected-pill">Сонгосон</div>}
                       </div>
-                      <ThemePreviewCard themeKey={key} isActive={isActive} isOwned={owned} price={price} onClick={() => previewTheme(key)} />
-                      <div className="shop-card-actions">
-                        <button type="button" className={owned ? "secondary-btn" : "primary-btn"} onClick={() => handleBuyTheme(key)}>
-                          {owned ? "Идэвхжүүлэх" : "Худалдаж авах"}
-                        </button>
-                        <button type="button" className="secondary-btn" onClick={() => previewTheme(key)}>
-                          {isActive ? "Харж байна" : owned ? "Сонгох" : "Туршиж харах"}
-                        </button>
-                      </div>
+
+                      <ThemePreviewCard
+                        themeKey={key}
+                        isActive={isActive}
+                        onClick={() => previewTheme(key)}
+                      />
+
+                      <button
+                        type="button"
+                        className={isActive ? "secondary-btn" : "primary-btn"}
+                        onClick={() => handleThemeSelect(key)}
+                      >
+                        {isActive ? "Сонгосон" : "Сонгох"}
+                      </button>
                     </div>
                   );
                 })}
@@ -6946,65 +8055,18 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
         </main>
 
-        <nav className="bottom-nav">
-          <button className={`nav-btn${view === "home" ? " active" : ""}`} onClick={() => setView("home")}>
-            <div className="nav-btn-icon"><Home size={21} strokeWidth={1.8} /></div>
-            <div className="nav-btn-label">Нүүр</div>
-          </button>
-
-          <button className={`nav-btn${view === "learn" ? " active" : ""}`} onClick={() => openProtectedView("learn")}>
-            <div className="nav-btn-icon"><BookOpen size={21} strokeWidth={1.8} /></div>
-            <div className="nav-btn-label">Сурах</div>
-          </button>
-
-          <button className={`nav-btn${view === "add-word" ? " active" : ""}`} onClick={() => openProtectedView("add-word")}>
-            <div className="nav-btn-icon"><Plus size={24} strokeWidth={2.2} /></div>
-            <div className="nav-btn-label">Нэмэх</div>
-          </button>
-
-          <button className={`nav-btn${view === "challenges" ? " active" : ""}`} onClick={() => openProtectedView("challenges")}>
-            <div className="nav-btn-icon"><Award size={21} strokeWidth={1.8} /></div>
-            <div className="nav-btn-label">Сорилт</div>
-          </button>
-
-          <button
-            className={`nav-btn${view === "library" || view === "reader" ? " active" : ""}`}
-            onClick={openLibraryView}
-          >
-            <div className="nav-btn-icon"><Notebook size={21} strokeWidth={1.8} /></div>
-            <div className="nav-btn-label">Ном</div>
-          </button>
-
-          <button className={`nav-btn${view === "leaderboard" ? " active" : ""}`} onClick={() => setView("leaderboard")}>
-            <div className="nav-btn-icon"><Trophy size={21} strokeWidth={1.8} /></div>
-            <div className="nav-btn-label">Rank</div>
-          </button>
-
-          <button className={`nav-btn${view === "shop" ? " active" : ""}`} onClick={() => openProtectedView("shop")}>
-            <div className="nav-btn-icon"><ShoppingBag size={21} strokeWidth={1.8} /></div>
-            <div className="nav-btn-label">Shop</div>
-          </button>
-          <button className={`nav-btn${view === "profile" ? " active" : ""}`} onClick={() => openProtectedView("profile")}>
-            <div className="nav-btn-icon">
-              {authUser?.avatar ? (
-                <Image
-                  src={authUser.avatar}
-                  alt=""
-                  width={24}
-                  height={24}
-                  unoptimized
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: "50%",
-                    objectFit: "cover",
-                    border: view === "profile" ? "2px solid var(--primary, #16a34a)" : "2px solid var(--border, #e5e7eb)",
-                  }}
-                />
-              ) : <User size={21} strokeWidth={1.8} />}
-            </div>
-            <div className="nav-btn-label">Профайл</div>
-          </button>
+        <nav className="bottom-nav" aria-label="Гол цэс">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`nav-btn${item.active ? " active" : ""}`}
+              onClick={() => item.onSelect()}
+            >
+              <div className="nav-btn-icon">{item.icon}</div>
+              <div className="nav-btn-label">{item.label}</div>
+            </button>
+          ))}
         </nav>
 
         {authUser && <button
