@@ -1,6 +1,6 @@
 "use client";
 
-import { parseBookFile } from "@/lib/parseBook";
+import { extractBookCover, parseBookFile } from "@/lib/parseBook";
 import { WordData } from "@/lib/push";
 import {
   markExplainedWordSaved,
@@ -12,7 +12,6 @@ import {
   upsertReaderVocabulary,
 } from "@/lib/vocabulary";
 import Link from "next/link";
-import { AuthModal } from "./AuthModal";
 import {
   ChevronLeft,
   ChevronRight,
@@ -200,6 +199,8 @@ type ImportedBookState = {
   name: string;
   text: string;
   importedAt: number;
+  coverUrl?: string | null;
+  coverImage?: string | null;
 };
 
 type UserStateResponse = {
@@ -544,6 +545,13 @@ export default function BookReader({
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
+  const explainedWordsRef = useRef<ExplainedWordEntry[]>([]);
+  const readerDisplayUser: ReaderAuthUser = readerAuthUser ?? {
+    id: "guest",
+    name: "Зочин",
+    avatar: null,
+    bio: "",
+  };
 
   function scrollToTop(behavior: ScrollBehavior = "smooth") {
     requestAnimationFrame(() => {
@@ -611,7 +619,7 @@ export default function BookReader({
       id: saved.importedAt,
       title: getCleanBookTitle(saved.name),
       authors: "Unknown author",
-      cover: null,
+      cover: saved.coverUrl || saved.coverImage || null,
       text: saved.text,
       chapters: importedChapters,
     });
@@ -652,12 +660,6 @@ export default function BookReader({
   }
 
   async function handleBookUpload(event: ChangeEvent<HTMLInputElement>) {
-    if (!readerAuthUser) {
-      event.target.value = "";
-      setLoadError("Ном import хийж уншихын тулд эхлээд бүртгүүлнэ үү.");
-      return;
-    }
-
     const file = event.target.files?.[0];
 
     if (!file) return;
@@ -666,7 +668,10 @@ export default function BookReader({
     setImportingBook(true);
 
     try {
-      const text = await parseBookFile(file);
+      const [text, coverUrl] = await Promise.all([
+        parseBookFile(file),
+        extractBookCover(file, file.name),
+      ]);
 
       if (!text.trim()) {
         setLoadError("Файл хоосон байна.");
@@ -679,6 +684,7 @@ export default function BookReader({
         name: file.name,
         text,
         importedAt,
+        coverUrl,
       };
 
       applyImportedBook(importedBook);
@@ -722,7 +728,7 @@ export default function BookReader({
   }, [preferences]);
 
   useEffect(() => {
-    if (!bookId || !readerAuthUser) return;
+    if (!bookId) return;
 
     async function loadBook() {
       try {
@@ -782,10 +788,10 @@ export default function BookReader({
     }
 
     loadBook();
-  }, [bookId, readerAuthUser]);
+  }, [bookId]);
 
   useEffect(() => {
-    if (bookId || !readerAuthUser) return;
+    if (bookId) return;
 
     try {
       const raw = localStorage.getItem("selected-imported-book");
@@ -805,7 +811,7 @@ export default function BookReader({
     }
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookId, readerAuthUser]);
+  }, [bookId]);
 
   useEffect(() => {
     try {
@@ -891,6 +897,7 @@ export default function BookReader({
   }, []);
 
   useEffect(() => {
+    explainedWordsRef.current = explainedWords;
     localStorage.setItem("ai-explained-words", JSON.stringify(explainedWords));
     if (readerStateLoaded) {
       void saveUserState("ai-explained-words", explainedWords);
@@ -972,18 +979,20 @@ export default function BookReader({
 
       const source = getVocabularySource();
       const explainedKey = data.word.trim().toLowerCase();
+      const nextExplainedWords = upsertExplainedWord(
+        explainedWordsRef.current,
+        data,
+        source
+      );
+      const explainedEntry =
+        nextExplainedWords.find((item) => item.key === explainedKey) ?? null;
 
-      setExplainedWords((prev) => {
-        const next = upsertExplainedWord(prev, data, source);
-        const explainedEntry =
-          next.find((item) => item.key === explainedKey) ?? null;
+      explainedWordsRef.current = nextExplainedWords;
+      setExplainedWords(nextExplainedWords);
 
-        if (explainedEntry) {
-          onAIWordExplained?.(explainedEntry);
-        }
-
-        return next;
-      });
+      if (explainedEntry) {
+        onAIWordExplained?.(explainedEntry);
+      }
     } catch (error) {
       console.error("Failed to explain word:", error);
       setApiError(getErrorMessage(error));
@@ -1141,10 +1150,6 @@ export default function BookReader({
         Уншигчийг бэлдэж байна...
       </div>
     );
-  }
-
-  if (!readerAuthUser) {
-    return <AuthModal onAuth={(user) => setReaderAuthUser(user)} />;
   }
 
   return (
@@ -3418,7 +3423,7 @@ export default function BookReader({
           chapters={chapters}
           onChapterChange={goToChapter}
           onOpenVocab={() => setVocabOpen(true)}
-          user={readerAuthUser}
+          user={readerDisplayUser}
         />
 
         <ReaderToolbar

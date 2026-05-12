@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ChangeEvent, CSSProperties, useEffect, useRef, useState } from "react";
-import { parseBookFile } from "@/lib/parseBook";
+import { extractBookCover, parseBookFile } from "@/lib/parseBook";
 
 type Book = {
   id: number;
@@ -19,6 +19,8 @@ type ImportedBook = {
   name: string;
   text: string;
   importedAt: number;
+  coverUrl?: string | null;
+  coverImage?: string | null;
 };
 
 type UserStateResponse = {
@@ -110,14 +112,22 @@ function ImportedBookCover({ book }: { book: ImportedBook }) {
   const title = getDisplayBookName(book.name);
   const themeStyle = getBookCoverTheme(`${book.id}-${title}`);
   const titleParts = title.split(/\s+/).filter(Boolean).slice(0, 4);
+  const coverImage = book.coverUrl || book.coverImage;
 
   return (
     <div className="generated-book-cover" style={themeStyle}>
-      <div className="cover-shine" />
-      <div className="cover-spine" />
-      <div className="cover-mark">{title.charAt(0).toUpperCase()}</div>
-      <div className="cover-title">{titleParts.join(" ") || title}</div>
-      <div className="cover-author">Тодорхойгүй зохиогч</div>
+      {coverImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className="imported-cover-image" src={coverImage} alt={title} />
+      ) : (
+        <>
+          <div className="cover-shine" />
+          <div className="cover-spine" />
+          <div className="cover-mark">{title.charAt(0).toUpperCase()}</div>
+          <div className="cover-title">{titleParts.join(" ") || title}</div>
+          <div className="cover-author">Тодорхойгүй зохиогч</div>
+        </>
+      )}
     </div>
   );
 }
@@ -286,7 +296,10 @@ export default function BookLibrary({
     setImportingBook(true);
 
     try {
-      const text = await parseBookFile(file);
+      const [text, coverUrl] = await Promise.all([
+        parseBookFile(file),
+        extractBookCover(file, file.name),
+      ]);
 
       if (!text.trim()) {
         setImportError("Файл хоосон байна.");
@@ -298,6 +311,7 @@ export default function BookLibrary({
         name: file.name,
         text,
         importedAt: Date.now(),
+        coverUrl,
       };
 
       setImportedBooks((prev) => {
@@ -1974,6 +1988,15 @@ export default function BookLibrary({
             radial-gradient(circle at 78% 18%, color-mix(in srgb, var(--cover-accent) 35%, transparent), transparent 34%),
             linear-gradient(145deg, var(--cover-start), var(--cover-end));
           color: #fff9ee;
+        }
+
+        .imported-cover-image {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          object-position: center;
         }
 
         .cover-shine {

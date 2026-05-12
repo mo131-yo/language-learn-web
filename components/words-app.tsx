@@ -1328,7 +1328,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [authPromptOpen, setAuthPromptOpen] = useState(false);
-  const [pendingBookId, setPendingBookId] = useState<number | null>(null);
+  const [pendingBookId] = useState<number | null>(null);
   const [pendingView, setPendingView] = useState<View | null>(null);
   const [userDbStateLoaded, setUserDbStateLoaded] = useState(false);
 
@@ -1378,6 +1378,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const lastActiveStorageKey = "words-last-active";
   const vocabReminderStorageKey = `words-vocab-reminders:${authUser?.id ?? "guest"}`;
   const aiExplainedStorageKey = "ai-explained-words";
+  const guestWordProgressStorageKey = "words:guest-word-progress";
 
   const saveDbState = useCallback((key: string, value: unknown) => {
     fetch("/api/user-state", {
@@ -1396,6 +1397,19 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   }
 
   function openProtectedView(nextView: View) {
+    if (
+      nextView === "learn" ||
+      nextView === "add-word" ||
+      nextView === "categories" ||
+      nextView === "library" ||
+      nextView === "reader" ||
+      nextView === "themes" ||
+      nextView === "leaderboard"
+    ) {
+      setView(nextView);
+      return;
+    }
+
     if (!authUser) {
       setPendingView(nextView);
       setAuthPromptOpen(true);
@@ -1576,6 +1590,27 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     likesStorageKey,
     vocabReminderStorageKey,
   ]);
+
+  useEffect(() => {
+    if (!authChecked || authUser) return;
+
+    try {
+      const raw = localStorage.getItem(guestWordProgressStorageKey);
+      if (!raw) return;
+
+      const progress = JSON.parse(raw) as Record<string, number>;
+      setWords((prev) =>
+        prev.map((word) => {
+          const mastery = progress[word.id];
+          return typeof mastery === "number"
+            ? { ...word, mastery: Math.min(5, Math.max(0, mastery)) }
+            : word;
+        })
+      );
+    } catch {
+      // Guest progress stays local and optional.
+    }
+  }, [authChecked, authUser, guestWordProgressStorageKey]);
 
 
   useEffect(() => {
@@ -2524,6 +2559,30 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
   async function updateMastery(word: Word, delta: number) {
     const mastery = Math.min(5, Math.max(0, word.mastery + delta));
+
+    if (!authUser) {
+      const updatedWord = { ...word, mastery };
+      const xpDelta = (updatedWord.mastery - word.mastery) * 20;
+
+      setWords((prev) => {
+        const next = prev.map((w) => (w.id === word.id ? updatedWord : w));
+        const progress = next.reduce<Record<string, number>>((acc, item) => {
+          if (item.mastery > 0) acc[item.id] = item.mastery;
+          return acc;
+        }, {});
+
+        localStorage.setItem(guestWordProgressStorageKey, JSON.stringify(progress));
+        return next;
+      });
+
+      if (xpDelta > 0) {
+        setStreak((s) => s + 1);
+        addXpEvent("gain", xpDelta, "Үг цээжилсэн");
+      }
+
+      return;
+    }
+
     const res = await fetch(`/api/words/${word.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -2594,9 +2653,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         setStreak((s) => s + 1);
         addXpEvent("gain", xpDelta, "Үг цээжилсэн");
       }
-    } else if (res.status === 401) {
-      setAuthPromptOpen(true);
-      setPendingView("learn");
     }
   }
 
@@ -6361,19 +6417,12 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     Суралцах үргэлжлүүлэх →
   </button>
 
-  <button
-    className="white-btn"
-    onClick={() => {
-      if (!authUser) {
-        setMode("quiz");
-        resetQuizSession();
-        setPendingView("learn");
-        setAuthPromptOpen(true);
-        return;
-      }
-      setMode("quiz");
-      resetQuizSession();
-      setView("learn");
+	  <button
+	    className="white-btn"
+	    onClick={() => {
+	      setMode("quiz");
+	      resetQuizSession();
+	      setView("learn");
     }}
     style={{
       background: "rgba(255,255,255,0.14)",
@@ -6500,39 +6549,11 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
 
         {view === "library" && (
           <div style={{ padding: 0 }}>
-            <BookLibrary
-              onReadBook={(bookId) => {
-                if (!authUser) {
-                  setPendingBookId(bookId);
-                  setAuthPromptOpen(true);
-                  return false;
-                }
-
-                return true;
-              }}
-              onReadImportedBook={() => {
-                if (!authUser) {
-                  setPendingView("library");
-                  setAuthPromptOpen(true);
-                  return false;
-                }
-
-                return true;
-              }}
-              onImportBook={() => {
-                if (!authUser) {
-                  setPendingView("library");
-                  setAuthPromptOpen(true);
-                  return false;
-                }
-
-                return true;
-              }}
-            />
+            <BookLibrary />
           </div>
         )}
 
-        {view === "reader" && authUser && (
+        {view === "reader" && (
           <div style={{ padding: 0 }}>
             <BookReader
               onBookWordSaved={handleBookWordSaved}
@@ -6542,7 +6563,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         )}
 
 
-          {view === "learn" && authUser && (
+          {view === "learn" && (
             <div className="flashcard-wrap review-page">
               <section className="review-hero">
                 <div className="review-hero-top">
@@ -7037,7 +7058,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           )}
 
 
-          {view === "add-word" && authUser && (
+          {view === "add-word" && (
             <div className="form-page">
               <div className="form-title">Үг нэмэх</div>
               <div className="form-sub">Нэмсэн үг бүх хэрэглэгчид харагдана</div>
@@ -7160,7 +7181,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           )}
 
 
-          {view === "categories" && authUser && (
+          {view === "categories" && (
             <div className="page">
               <div className="form-title">Ангиллууд</div>
               <div className="form-sub">Үгсээ ангиллаар нь давт</div>
