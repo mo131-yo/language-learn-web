@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Мөнх-Оргил Мөнхцэцэг — CV</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    font-size: 13px;
+    color: #1a1a2e;
+    background: #f5f5f0;
+    padding: 20px;
+  }
+
+  .page {
+    background: white;
+    max-width: 210mm;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    min-height: 297mm;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+  }
+
+  /* LEFT SIDEBAR */
+  .sidebar {
+    background: #f1efe8;
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .section-title {
+    font-size: 9px;
+    font-weight: 600;
+    color: #185FA5;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-top: 18px;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1.5px solid #185FA5;
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  .contact-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 5px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #1a1a2e;
+    word-break: break-all;
+  }
+  .contact-item a { color: #185FA5; text-decoration: none; }
+  .contact-icon { color: #185FA5; min-width: 14px; font-style: normal; }
+
+  .skill-cat {
+    font-size: 9px;
+    font-weight: 600;
+    color: #888780;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 7px;
+    margin-bottom: 2px;
+  }
+  .skill-val {
+    font-size: 11px;
+    color: #1a1a2e;
+    line-height: 1.5;
+  }
+
+  .edu-school {
+    font-size: 11px;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin-top: 7px;
+  }
+  .edu-detail {
+    font-size: 10.5px;
+    color: #888780;
+    line-height: 1.4;
+  }
+
+  .lang-item {
+    font-size: 11px;
+    color: #1a1a2e;
+    margin-bottom: 3px;
+  }
+
+  /* RIGHT MAIN */
+  .main {
+    padding: 24px 22px 24px 20px;
+  }
+
+  .name {
+    font-size: 22px;
+    font-weight: 600;
+    color: #1a1a2e;
+    line-height: 1.2;
+  }
+  .subtitle {
+    font-size: 11px;
+    color: #185FA5;
+    margin-top: 4px;
+    margin-bottom: 10px;
+  }
+  .divider {
+    border: none;
+    border-top: 2px solid #185FA5;
+    margin-bottom: 12px;
+  }
+  .summary {
+    font-size: 11.5px;
+    color: #444;
+    line-height: 1.7;
+    margin-bottom: 16px;
+  }
+
+  .r-section-title {
+    font-size: 9px;
+    font-weight: 600;
+    color: #185FA5;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1.5px solid #185FA5;
+    margin-top: 16px;
+  }
+
+  .project {
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 0.5px solid #e0ddd5;
+  }
+  .project:last-child { border-bottom: none; margin-bottom: 0; }
+
+  .proj-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin-bottom: 2px;
+  }
+  .proj-role {
+    font-size: 10.5px;
+    color: #185FA5;
+    font-style: italic;
+    margin-bottom: 2px;
+  }
+  .proj-tech {
+    font-size: 10px;
+    color: #888780;
+    margin-bottom: 5px;
+  }
+  .proj-link {
+    font-size: 10px;
+    color: #185FA5;
+    text-decoration: none;
+    margin-left: 8px;
+  }
+  .proj-desc {
+    font-size: 11px;
+    color: #555;
+    line-height: 1.5;
+    margin-bottom: 5px;
+  }
+  .proj-bullets {
+    list-style: none;
+    padding: 0;
+  }
+  .proj-bullets li {
+    font-size: 11px;
+    color: #1a1a2e;
+    line-height: 1.6;
+    padding-left: 14px;
+    position: relative;
+    margin-bottom: 2px;
+  }
+  .proj-bullets li::before {
+    content: '•';
+    color: #185FA5;
+    position: absolute;
+    left: 0;
+    font-weight: 600;
+  }
+
+  /* Edit hint */
+  .edit-hint {
+    background: #e6f1fb;
+    color: #185FA5;
+    font-size: 11px;
+    padding: 10px 16px;
+    text-align: center;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    max-width: 210mm;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  @media print {
+    body { background: white; padding: 0; }
+    .edit-hint { display: none; }
+    .page { box-shadow: none; max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar" contenteditable="true" spellcheck="false">
+
+    <div class="section-title">Холбоо барих</div>
+
+    <div class="contact-item">
+      <i class="contact-icon">✉</i>
+      <span>munhorgilmunhtsetseg333@gmail.com</span>
+    </div>
+    <div class="contact-item">
+      <i class="contact-icon">☎</i>
+      <span>+976 ____-____</span>
+    </div>
+    <div class="contact-item">
+      <i class="contact-icon">⌂</i>
+      <span>Улаанбаатар, Монгол</span>
+    </div>
+    <div class="contact-item">
+      <i class="contact-icon">⬡</i>
+      <a href="https://github.com/mo131-yo">github.com/mo131-yo</a>
+    </div>
+
+    <div class="section-title">Техникийн ур чадвар</div>
+
+    <div class="skill-cat">Frontend</div>
+    <div class="skill-val">Next.js, React, TypeScript, JavaScript, HTML, CSS, Tailwind CSS</div>
+
+    <div class="skill-cat">Backend / API</div>
+    <div class="skill-val">Python, Node.js, GraphQL, REST API</div>
+
+    <div class="skill-cat">AI / Data</div>
+    <div class="skill-val">RAG, Pinecone DB, metadata structuring, dataset processing</div>
+
+    <div class="skill-cat">Сан / DB</div>
+    <div class="skill-val">Cloudinary, Cloudflare D1, localStorage</div>
+
+    <div class="skill-cat">Хэрэгслүүд</div>
+    <div class="skill-val">Git, GitHub, Vercel, VS Code, Figma</div>
+
+    <div class="section-title">Боловсрол</div>
+
+    <div class="edu-school">Pinecone Academy</div>
+    <div class="edu-detail">Software Engineer Bootcamp<br>Frontend, Backend, Fullstack, API Integration</div>
+
+    <div class="edu-school">Хөгжил Цогцолбор Сургууль</div>
+    <div class="edu-detail">10–12-р анги</div>
+
+    <div class="edu-school">Ирээдүй Цогцолбор Сургууль</div>
+    <div class="edu-detail">1–9-р анги</div>
+
+    <div class="section-title">Хэл</div>
+    <div class="lang-item">Монгол хэл — Төрөлх</div>
+    <div class="lang-item">Англи хэл — Техникийн баримт бичиг унших чадвартай</div>
+
+  </div>
+
+  <!-- MAIN -->
+  <div class="main" contenteditable="true" spellcheck="false">
+
+    <div class="name">Мөнх-Оргил Мөнхцэцэг</div>
+    <div class="subtitle">Junior Software Developer &nbsp;|&nbsp; Frontend · Fullstack · AI/Data Integration</div>
+    <hr class="divider">
+
+    <div class="summary">
+      Next.js, React, TypeScript, Python, GraphQL, Pinecone DB болон Cloudinary ашиглан frontend, fullstack болон AI/data integration чиглэлд ажилласан Junior Software Developer. Хэрэглэгчийн асуудлыг шинжилж, өгөгдлийн чанар болон scalable workflow-г нэгтгэсэн шийдэл боловсруулахад анхаардаг.
+    </div>
+
+    <div class="r-section-title">Төслийн туршлага</div>
+
+    <div class="project">
+      <div class="proj-title">Chatbot / Бараа санал болгох систем
+        <a class="proj-link" href="https://chatbot-eta-six-78.vercel.app/">🔗 Demo →</a>
+      </div>
+      <div class="proj-role">Backend &amp; AI Integration Developer</div>
+      <div class="proj-tech">Python · Pinecone DB · RAG · Kaggle Dataset · Cloudinary</div>
+      <div class="proj-desc">Хэрэглэгчийн асуултад тохирох бүтээгдэхүүнийг зураг болон мэдээлэлтэй санал болгодог RAG-based chatbot.</div>
+      <ul class="proj-bullets">
+        <li>45K Amazon dataset-ийг Pinecone DB-д оруулж, RAG-based product search бүрдүүлсэн.</li>
+        <li>Google Cloud API, DuckDuckGo, Unsplash, Pixabay зэрэг image retrieval шийдлүүдийг туршиж, автомат хайлт хангалтгүй гэж дүгнэсэн.</li>
+        <li>Admin-managed image upload workflow боловсруулж, Cloudinary URL-ийг Pinecone metadata-д холбосноор чанартай зурагтай бараа харуулах боломжтой болгосон.</li>
+      </ul>
+    </div>
+
+    <div class="project">
+      <div class="proj-title">Mongol Atlas — Interactive Map Platform
+        <a class="proj-link" href="https://mongol-atlas.vercel.app/">🔗 Demo →</a>
+      </div>
+      <div class="proj-role">Frontend / Map Data Editor Developer</div>
+      <div class="proj-tech">Next.js · React · TypeScript · GeoJSON · Admin Panel</div>
+      <div class="proj-desc">Монгол болон улс орнуудын газрын зураг, хил, координатын мэдээллийг interactive байдлаар харуулах веб платформ.</div>
+      <ul class="proj-bullets">
+        <li>AI-generated GeoJSON-д давхардал, буруу байрлал, далай дээр орсон polygon зэрэг data quality асуудлыг илрүүлсэн.</li>
+        <li>Admin panel дээрээс polygon цэгүүдийг зөөх, нэмэх, нарийвчлах visual editor боловсруулсан — код өөрчлөхгүйгээр хурдан засвар хийх боломжтой болгосон.</li>
+        <li>Map data-ийн нарийвчлал мэдэгдэхүйц сайжирч, засварлалтын хугацаа эрс богиносов.</li>
+      </ul>
+    </div>
+
+    <div class="project">
+      <div class="proj-title">Language Learning Web Application</div>
+      <div class="proj-role">Fullstack Solo Developer</div>
+      <div class="proj-tech">Next.js · React · TypeScript · Tailwind CSS</div>
+      <div class="proj-desc">Хэрэглэгч ном унших, үг хадгалах, суралцах явцаа үргэлжлүүлэх боломжтой хэл сурах веб апп.</div>
+      <ul class="proj-bullets">
+        <li>UI, feature flow, responsive layout болон номын сан/унших хэсгийн бүтэц бие даан хөгжүүлсэн.</li>
+        <li>Vocabulary, progress, user state-ийн урсгалыг боловсруулж, localStorage-с database-driven architecture руу шилжүүлэх төлөвлөгөө боловсруулсан.</li>
+      </ul>
+    </div>
+
+    <div class="project">
+      <div class="proj-title">Hospital / Doctor Appointment Web App</div>
+      <div class="proj-role">Fullstack Team Project — Active Development</div>
+      <div class="proj-tech">Next.js · TypeScript · GraphQL · Cloudflare D1</div>
+      <div class="proj-desc">Эмч, үйлчилгээ, өвчний төрөл болон цаг захиалгыг хэрэглэгчид ойлгомжтой харуулах систем.</div>
+      <ul class="proj-bullets">
+        <li>Static мэдээллийг database-driven бүтэц рүү шилжүүлэхээр GraphQL API болон Cloudflare D1 өгөгдлийн урсгал төлөвлөж байна.</li>
+        <li>Өвчний төрлөөр эмч харах, үйлчилгээ сонгох, цаг захиалах user flow-г сайжруулж байна.</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

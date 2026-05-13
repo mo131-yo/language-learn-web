@@ -1948,14 +1948,22 @@ export default function BookReader({
         }
 
         .popup {
+          --paper-page: #fff9ec;
+          --paper-soft: #eadcc5;
+          --ink: #211b13;
+          --ink-light: #716554;
+          --accent: var(--primary, var(--ds-primary, #16a34a));
+          --accent-soft: var(--primary-soft, var(--ds-primary-soft, #e8f7ed));
+          --border: rgba(91, 73, 49, 0.18);
+          --popup-surface: var(--paper-page);
+          --popup-muted: color-mix(in srgb, var(--paper-soft) 72%, var(--paper-page));
+          --popup-featured: color-mix(in srgb, var(--accent-soft) 64%, var(--paper-page));
           font-family: 'DM Sans', sans-serif;
-          background: color-mix(in srgb, var(--paper-page) 97%, white);
+          background: var(--popup-surface);
           color: var(--ink);
-          border: 1px solid rgba(22, 163, 74, 0.24);
+          border: 1px solid var(--border);
           border-radius: 28px;
-          box-shadow:
-            0 24px 70px rgba(20, 31, 24, 0.22),
-            0 0 0 9999px rgba(30, 24, 14, 0.08);
+          box-shadow: 0 24px 64px rgba(20, 31, 24, 0.26);
           animation: sheetIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
           position: fixed;
           left: 50%;
@@ -1968,7 +1976,25 @@ export default function BookReader({
           display: flex;
           flex-direction: column;
           opacity: 1;
-          z-index: 9999;
+          z-index: 10000;
+          isolation: isolate;
+        }
+
+        .popup.popup-theme-white {
+          --paper-page: #ffffff;
+          --paper-soft: #e8eee8;
+          --ink: #111827;
+          --ink-light: #64748b;
+          --border: rgba(17, 24, 39, 0.12);
+        }
+
+        .popup.popup-theme-dark {
+          --paper-page: #18231e;
+          --paper-soft: #253229;
+          --ink: #f5ead9;
+          --ink-light: #c1b5a4;
+          --accent-soft: #123323;
+          --border: rgba(255, 255, 255, 0.14);
         }
 
         .popup::before {
@@ -1984,7 +2010,7 @@ export default function BookReader({
 
         .popup-header {
           padding: 10px 18px 0;
-          background: transparent;
+          background: var(--popup-surface);
           color: var(--ink);
           flex: 0 0 auto;
         }
@@ -2020,7 +2046,7 @@ export default function BookReader({
           max-height: none;
           overflow-y: auto;
           overscroll-behavior: contain;
-          background: transparent;
+          background: var(--popup-surface);
           color: var(--ink);
           flex: 1 1 auto;
         }
@@ -2111,6 +2137,7 @@ export default function BookReader({
 
         .ai-loading {
           padding: 18px;
+          background: var(--popup-surface);
         }
 
         .ai-loading-head {
@@ -2142,6 +2169,7 @@ export default function BookReader({
 
         .ai-error-state {
           padding: 20px 18px;
+          background: var(--popup-surface);
         }
 
         .ai-error-title {
@@ -2186,8 +2214,8 @@ export default function BookReader({
         }
 
         .grammar-box {
-          background: #fef9ec;
-          border: 1px solid #f0d88a;
+          background: var(--popup-muted);
+          border: 1px solid var(--border);
           border-radius: 10px;
           padding: 12px 14px;
           margin-bottom: 10px;
@@ -2226,8 +2254,8 @@ export default function BookReader({
         }
 
         .phrase-card {
-          background: #fff7ed;
-          border: 1px solid #fed7aa;
+          background: var(--popup-muted);
+          border: 1px solid var(--border);
           border-radius: 10px;
           padding: 10px 12px;
           margin-bottom: 8px;
@@ -2266,8 +2294,8 @@ export default function BookReader({
         }
 
         .example-box {
-          background: #fff7ed;
-          border: 1px solid #fed7aa;
+          background: var(--popup-muted);
+          border: 1px solid var(--border);
           border-left: 5px solid #f97316;
           border-radius: 12px;
           padding: 12px 14px;
@@ -2474,17 +2502,16 @@ export default function BookReader({
         }
 
         .explain-card {
-          border: 1px solid rgba(91, 73, 49, 0.14);
+          border: 1px solid var(--border);
           border-radius: 20px;
-          background: rgba(255, 252, 244, 0.82);
+          background: var(--popup-muted);
           padding: 14px;
-          box-shadow: 0 8px 24px rgba(74, 54, 28, 0.06);
+          box-shadow: 0 8px 20px rgba(20, 31, 24, 0.08);
         }
 
         .explain-card.featured {
-          border-color: rgba(22, 163, 74, 0.22);
-          background:
-            linear-gradient(135deg, rgba(232, 247, 237, 0.72), rgba(255, 252, 244, 0.92));
+          border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+          background: var(--popup-featured);
         }
 
         .explain-card-head {
@@ -2542,7 +2569,7 @@ export default function BookReader({
           max-width: 100%;
           border-radius: 999px;
           padding: 6px 10px;
-          background: rgba(22, 163, 74, 0.08);
+          background: var(--accent-soft);
           color: var(--ink);
           font-size: 0.78rem;
           font-weight: 850;
@@ -3032,20 +3059,16 @@ export default function BookReader({
 
         @media (max-width: 760px) {
           .popup {
-            left: 0 !important;
-            right: 0 !important;
+            left: 12px !important;
+            right: 12px !important;
             top: auto !important;
-            bottom: 0 !important;
+            bottom: 12px !important;
             transform: none;
-            width: 100vw !important;
+            width: auto !important;
+            max-width: calc(100vw - 24px);
             max-height: min(88vh, 720px);
-            border-right: 0;
-            border-bottom: 0;
-            border-left: 0;
-            border-radius: 28px 28px 0 0;
-            box-shadow:
-              0 -20px 60px rgba(20, 31, 24, 0.2),
-              0 0 0 9999px rgba(30, 24, 14, 0.14);
+            border-radius: 24px;
+            box-shadow: 0 -18px 48px rgba(20, 31, 24, 0.26);
             animation: sheetInMobile 0.22s cubic-bezier(0.22, 1, 0.36, 1);
           }
 
@@ -3592,7 +3615,7 @@ export default function BookReader({
       {popup.visible && (
         <div
           ref={popupRef}
-          className="popup"
+          className={`popup popup-theme-${preferences.theme}`}
           role="dialog"
           aria-modal="true"
           aria-label={`${selectedWord || "Үг"} тайлбар`}
