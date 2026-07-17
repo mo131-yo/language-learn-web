@@ -9,7 +9,7 @@ This is a Next.js App Router project for a Mongolian vocabulary learning and boo
 - Tailwind CSS
 - shadcn/ui where useful
 - PostgreSQL / Neon
-- Clerk auth
+- Custom JWT auth (lib/auth-helpers.ts, cookie: linguist_session)
 - Server-side API routes in app/api
 
 ## Commands
@@ -23,7 +23,7 @@ This is a Next.js App Router project for a Mongolian vocabulary learning and boo
 - Do not rewrite the whole project.
 - Do not delete existing logic unless explicitly asked.
 - Do not change database schema unless asked.
-- Do not break Clerk auth.
+- Do not break the custom JWT auth in lib/auth-helpers.ts.
 - Do not move files unnecessarily.
 - Keep existing imports working.
 - Prefer small focused changes.

@@ -6,9 +6,23 @@ import { queryOne } from "@/lib/db";
 import { broadcast } from "@/lib/sse-store";
 import type { Category, Word } from "@/lib/types";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_KEY,
-});
+class MissingOpenAIKeyError extends Error {
+  constructor() {
+    super("OPENAI_KEY is not configured.");
+    this.name = "MissingOpenAIKeyError";
+  }
+}
+
+let openaiClient: OpenAI | null = null;
+
+// Constructed lazily: the OpenAI constructor throws when no key resolves, and
+// Next.js imports this module at build time to collect page data.
+function getOpenAIClient(): OpenAI {
+  const apiKey = process.env.OPENAI_KEY ?? process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new MissingOpenAIKeyError();
+  openaiClient ??= new OpenAI({ apiKey });
+  return openaiClient;
+}
 
 function normalizeBookCategoryName(bookTitle: unknown) {
   const title = typeof bookTitle === "string" ? bookTitle.trim() : "";
@@ -93,7 +107,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ...cached, from_cache: true, savedWord: saved?.word ?? null, category: saved?.category ?? null });
     }
 
-    const response = await client.chat.completions.create({
+    const response = await getOpenAIClient().chat.completions.create({
       model: "gpt-4o",
       response_format: { type: "json_object" },
       messages: [
@@ -175,6 +189,12 @@ IMPORTANT: If the word is NOT inflected (is_inflected: false), still include the
 
     return NextResponse.json({ ...data, savedWord: saved?.word ?? null, category: saved?.category ?? null });
   } catch (error) {
+    if (error instanceof MissingOpenAIKeyError) {
+      return NextResponse.json(
+        { error: "Тайлбар үйлчилгээ тохируулагдаагүй байна. (OPENAI_KEY missing)" },
+        { status: 503 }
+      );
+    }
     console.error("Explain word API error:", error);
     return NextResponse.json({ error: "Failed to explain word" }, { status: 500 });
   }

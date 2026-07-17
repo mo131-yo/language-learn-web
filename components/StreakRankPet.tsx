@@ -219,7 +219,7 @@ const KIND_ANIM: Record<string, string> = {
   fireDragon: "petDragonFly 1.65s ease-in-out infinite, petFireGlow .62s ease-in-out infinite",
 };
 
-function AnimatedPet({ pet: p, skin }: { pet: RankPet; skin: Skin }) {
+function AnimatedPet({ pet: p }: { pet: RankPet }) {
   const anim = KIND_ANIM[p.kind] ?? "petCuteWiggle 2.05s ease-in-out infinite";
   return (
     <div className={`rpc-mascot rpc-pet-${p.kind}`} aria-label={p.animalName}>
@@ -364,7 +364,7 @@ export function StreakRankPetCard({
 
         <div className="rpc-stage">
           <div className="rpc-halo" style={{ background: `radial-gradient(circle,rgba(255,255,255,.35) 0%,transparent 55%), radial-gradient(circle at 50% 76%,${activeSkin.dot},transparent 72%)` }} />
-          <AnimatedPet pet={current} skin={activeSkin} />
+          <AnimatedPet pet={current} />
         </div>
 
 

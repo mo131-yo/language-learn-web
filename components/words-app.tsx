@@ -485,7 +485,7 @@ function UserProfileModal({
         )
       )
     : 100;
-  const msgs = chatMessages[user.id] ?? [];
+  const msgs = useMemo(() => chatMessages[user.id] ?? [], [chatMessages, user.id]);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
 
@@ -1114,7 +1114,10 @@ function ChatDrawer({
   onInputChange: (val: string) => void;
   onSendChat: (toId: string) => void;
 }) {
-  const activeMessages = activeUser ? chatMessages[activeUser.id] ?? [] : [];
+  const activeMessages = useMemo(
+    () => (activeUser ? chatMessages[activeUser.id] ?? [] : []),
+    [activeUser, chatMessages]
+  );
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   function getMessageStatus(message: ChatMessage, index: number) {
@@ -1857,6 +1860,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   useEffect(() => {
     if (!profileModalUser || !areFriends(profileModalUser.id)) return;
     setChatReadState((prev) => ({ ...prev, [profileModalUser.id]: Date.now() }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: run only when the modal target changes. areFriends is re-created each render; including it loops via setChatReadState(Date.now()).
   }, [profileModalUser]);
 
   useEffect(() => {
@@ -1884,6 +1888,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       window.removeEventListener("keydown", handleActivity);
       document.removeEventListener("visibilitychange", handleActivity);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-per-session subscription. touchMyActivity is re-created each render; including it re-registers the interval + 4 global listeners every render.
   }, [authUser]);
 
 
@@ -2006,10 +2011,8 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     words.reduce((t, w) => t + w.mastery * 20, 0);
   const currentTitleLevel = getTitleLevel(xpTotal);
   const nextTitleLevel = getNextTitleLevel(xpTotal);
-  const unlockedTitleCount = TITLE_LEVELS.filter((level) => xpTotal >= level.xp).length;
   const currentRankPet =
     [...RANK_PETS].reverse().find((pet) => xpTotal >= pet.xp) ?? RANK_PETS[0];
-  const unlockedRankPetCount = RANK_PETS.filter((pet) => xpTotal >= pet.xp).length;
   const titleProgressPct = nextTitleLevel
     ? Math.min(
         100,
@@ -2361,18 +2364,21 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     startTransition(() => window.location.reload());
   }
 
-  async function postJson<T>(url: string, body: unknown, method = "POST"): Promise<T> {
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const p = await res.json().catch(() => ({ error: "Request failed." }));
-      throw new Error(p.error ?? "Request failed.");
-    }
-    return res.json();
-  }
+  const postJson = useCallback(
+    async <T,>(url: string, body: unknown, method = "POST"): Promise<T> => {
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const p = await res.json().catch(() => ({ error: "Request failed." }));
+        throw new Error(p.error ?? "Request failed.");
+      }
+      return res.json();
+    },
+    []
+  );
 
   async function handleLogout() {
     try {
@@ -3277,6 +3283,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     const name = authUser?.name || "?";
     if (avatar) {
       return (
+        // eslint-disable-next-line @next/next/no-img-element -- avatars are base64 data: URIs (readAsDataURL); next/image cannot optimize data URIs.
         <img
           src={avatar}
           alt={name}
@@ -7609,6 +7616,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                     pendingRequestsToMe.map((req) => (
                       <div key={req.id} className="friend-req-item">
                         {req.fromAvatar ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- avatars are base64 data: URIs; next/image cannot optimize data URIs.
                           <img src={req.fromAvatar} alt={req.fromName} style={{ width: 36, height: 36, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
                         ) : (
                           <div style={{ width: 36, height: 36, borderRadius: "50%", background: "var(--primary-soft, #f0fdf4)", color: "var(--primary, #16a34a)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, flexShrink: 0 }}>
