@@ -8,11 +8,22 @@ export const metadata: Metadata = {
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Words Neon",
+  },
+  other: {
+    "apple-mobile-web-app-capable": "yes",
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#09111f"
+  themeColor: "#09111f",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
