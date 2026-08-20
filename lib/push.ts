@@ -1,8 +1,6 @@
 import webpush from "web-push";
 import { getPool } from "@/lib/db";
 
-// ─── VAPID / Web Push ───────────────────────────────────────────────────────
-
 export function configurePush(): boolean {
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
@@ -15,8 +13,6 @@ export function configurePush(): boolean {
   webpush.setVapidDetails(subject, publicKey, privateKey);
   return true;
 }
-
-// ─── Neon DB ─────────────────────────────────────────────────────────────────
 
 export async function ensureTable() {
   const sql = getPool();

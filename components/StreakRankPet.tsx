@@ -185,7 +185,6 @@ function getSavedSkinKey(kind: PetKind) {
   return `rank-pet-skin-${kind}`;
 }
 
-// Duolingo-style per-kind animations
 const KIND_ANIM: Record<string, string> = {
   egg: "petEggBob 2s ease-in-out infinite",
   chick: "petChickBounce 1.18s cubic-bezier(.34,1.56,.64,1) infinite",
@@ -246,7 +245,6 @@ function AnimatedPet({ pet: p }: { pet: RankPet }) {
   );
 }
 
-// ── Broken-heart overlay (Duolingo-style) ─────────────────────────────────────
 function StreakLostOverlay({ onRecover }: { onRecover: () => void }) {
   return (
     <div className="rpc-lost-overlay">
@@ -260,7 +258,6 @@ function StreakLostOverlay({ onRecover }: { onRecover: () => void }) {
   );
 }
 
-// ── Main card ─────────────────────────────────────────────────────────────────
 export function StreakRankPetCard({
   lifetimeXp,
   spendableXp,
@@ -284,7 +281,6 @@ export function StreakRankPetCard({
   const [shaking, setShaking] = useState(false);
   const prevLost = useRef(false);
 
-  // Shake card when streakLost first becomes true
   useEffect(() => {
     if (streakLost && !prevLost.current) {
       setShaking(true);
@@ -408,7 +404,6 @@ export function StreakRankPetCard({
       </div>
 
       <style jsx global>{`
-        /* ── Card shell ─────────────────────────────────────────────────────── */
         .rpc-card {
           position: relative;
           overflow: hidden;
@@ -423,10 +418,8 @@ export function StreakRankPetCard({
         .rpc-card:hover { transform: translateY(-4px); }
         .rpc-card:hover .rpc-emoji { animation-name: petBoop !important; }
 
-        /* shake when streak is lost */
         .rpc-shake { animation: rpcCardShake .7s cubic-bezier(.36,.07,.19,.97) both; }
 
-        /* decorative translucent circles */
         .rpc-bubble { position: absolute; border-radius: 50%; pointer-events: none; }
         .rpc-bubble-tr {
           width: 240px; height: 240px;
@@ -439,7 +432,6 @@ export function StreakRankPetCard({
           background: rgba(255,255,255,.12);
         }
 
-        /* ── Broken-heart overlay ─────────────────────────────────────────── */
         .rpc-lost-overlay {
           position: absolute;
           inset: 0;
@@ -494,7 +486,6 @@ export function StreakRankPetCard({
         .rpc-prog-box,
         .rpc-stats { position: relative; z-index: 2; }
 
-        /* ── Top row ──────────────────────────────────────────────────────── */
         .rpc-head {
           display: flex;
           align-items: flex-start;
@@ -526,7 +517,6 @@ export function StreakRankPetCard({
           box-shadow: 0 4px 12px rgba(0,0,0,.2);
         }
 
-        /* ── Skin selector ────────────────────────────────────────────────── */
         .rpc-skin-row {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -564,7 +554,6 @@ export function StreakRankPetCard({
           flex-shrink: 0;
         }
 
-        /* ── Pet stage ────────────────────────────────────────────────────── */
         .rpc-stage {
           position: relative;
           height: 330px;
@@ -584,7 +573,6 @@ export function StreakRankPetCard({
           z-index: 1;
         }
 
-        /* ── Mascot wrapper ───────────────────────────────────────────────── */
         .rpc-mascot {
           position: relative;
           z-index: 20;
@@ -634,7 +622,6 @@ export function StreakRankPetCard({
           animation: rpcShadowPulse 2.4s ease-in-out infinite;
         }
 
-        /* clouds */
         .rpc-cloud {
           position: absolute;
           border-radius: 50%;
@@ -645,7 +632,6 @@ export function StreakRankPetCard({
         .rpc-cloud-1 { width: 86px; height: 86px; top: 20px; left: 26px; }
         .rpc-cloud-2 { width: 60px; height: 60px; right: 24px; bottom: 46px; animation-delay: .6s; }
 
-        /* hearts */
         .rpc-heart {
           position: absolute;
           z-index: 8;
@@ -658,7 +644,6 @@ export function StreakRankPetCard({
         .rpc-heart-2 { left: 58px; bottom: 72px; font-size: 16px; animation-delay: .7s; }
         .rpc-heart-3 { right: 78px; bottom: 44px; font-size: 13px; animation-delay: 1.2s; }
 
-        /* sparks */
         .rpc-spark {
           position: absolute;
           z-index: 9;
@@ -672,7 +657,6 @@ export function StreakRankPetCard({
         .rpc-spark-b { top: 74px; right: 38px; font-size: 17px; animation-delay: .45s; }
         .rpc-spark-c { bottom: 58px; left: 80px; font-size: 18px; animation-delay: .9s; }
 
-        /* cheeks */
         .rpc-cheek {
           position: absolute;
           top: 59%;
@@ -687,7 +671,6 @@ export function StreakRankPetCard({
         .rpc-cheek-l { left: 20px; }
         .rpc-cheek-r { right: 20px; }
 
-        /* shines */
         .rpc-shine {
           position: absolute;
           z-index: 46;
@@ -699,13 +682,11 @@ export function StreakRankPetCard({
         .rpc-shine-1 { width: 17px; height: 17px; top: 40px; left: 44px; }
         .rpc-shine-2 { width: 10px; height: 10px; top: 76px; right: 42px; animation-delay: .55s; }
 
-        /* ── Rank info ────────────────────────────────────────────────────── */
         .rpc-info { text-align: center; margin-bottom: 14px; }
         .rpc-rank-name { font-size: 23px; font-weight: 900; margin-bottom: 3px; letter-spacing: -.03em; }
         .rpc-rank-stage { font-size: 13px; font-weight: 900; opacity: .78; margin-bottom: 7px; }
         .rpc-rank-desc { font-size: 13px; line-height: 1.45; font-weight: 800; opacity: .8; max-width: 340px; margin: 0 auto; }
 
-        /* ── Progress box ─────────────────────────────────────────────────── */
         .rpc-prog-box {
           border-radius: 16px;
           padding: 12px;
@@ -736,7 +717,6 @@ export function StreakRankPetCard({
         }
         .rpc-prog-note { font-size: 12px; font-weight: 800; opacity: .72; margin-top: 7px; }
 
-        /* ── Stats ────────────────────────────────────────────────────────── */
         .rpc-stats {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -751,9 +731,6 @@ export function StreakRankPetCard({
         .rpc-stat span { display: block; font-size: 11px; font-weight: 900; opacity: .72; margin-bottom: 3px; }
         .rpc-stat strong { display: block; font-size: 17px; font-weight: 900; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-        /* ════════════════════════════════════════════════════════════════════
-           PER-KIND EMOJI ANIMATIONS (Duolingo inspired)
-           ════════════════════════════════════════════════════════════════════ */
         @keyframes petEggBob {
           0%   { transform: translate3d(0,0,0) rotate(0deg) scale(1,1); }
           25%  { transform: translate3d(-3px,-8px,0) rotate(-4deg) scale(1.02,.98); }
@@ -865,7 +842,6 @@ export function StreakRankPetCard({
           100% { transform: translate3d(0,0,0) rotate(0deg) scale(1); }
         }
 
-        /* ── Mascot float wrapper ─────────────────────────────────────────── */
         @keyframes rpcMascotFloat {
           0%   { transform: translate3d(0,0,0) rotate(0deg); }
           25%  { transform: translate3d(3px,-7px,0) rotate(-1.2deg); }
@@ -874,7 +850,6 @@ export function StreakRankPetCard({
           100% { transform: translate3d(0,0,0) rotate(0deg); }
         }
 
-        /* ── Ambient animations ───────────────────────────────────────────── */
         @keyframes rpcHaloPulse {
           0%,100% { opacity: .22; transform: scale(.93); }
           50%      { opacity: .48; transform: scale(1.09); }
@@ -909,7 +884,6 @@ export function StreakRankPetCard({
           50%      { opacity: 1;  transform: scale(1.38); }
         }
 
-        /* ── Overlay / card animations ────────────────────────────────────── */
         @keyframes rpcFadeIn {
           from { opacity: 0; }
           to   { opacity: 1; }
@@ -930,7 +904,6 @@ export function StreakRankPetCard({
           75%     { transform: rotate(-1deg); }
         }
 
-        /* ── Responsive ───────────────────────────────────────────────────── */
         @media (max-width: 520px) {
           .rpc-card { padding: 16px 16px 20px; border-radius: 24px; min-height: 545px; }
           .rpc-title { font-size: 24px; }

@@ -682,7 +682,6 @@ function UserProfileModal({
             padding: "16px 20px",
           }}
         >
-          {/* XP Progress */}
           <div
             style={{
               marginBottom: 14,
@@ -1343,14 +1342,12 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   const [vocabReminderStatus, setVocabReminderStatus] = useState("Мэдэгдэл хаалттай байна");
   const [aiExplainedWords, setAiExplainedWords] = useState<ExplainedWordEntry[]>([]);
 
-  // Social state
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
   const [heartReactions, setHeartReactions] = useState<HeartReaction[]>([]);
   const [friendRequestsOpen, setFriendRequestsOpen] = useState(false);
   const [heartAnimatingIds, setHeartAnimatingIds] = useState<Set<string>>(new Set());
   const [leaderboardAnimated, setLeaderboardAnimated] = useState(false);
 
-  // NEW: Profile modal, chat, likes, XP toasts
   const [profileModalUser, setProfileModalUser] = useState<LeaderboardUser | null>(null);
   const [leaderboardLikes, setLeaderboardLikes] = useState<Record<string, boolean>>({});
   const [leaderboardSortMode, setLeaderboardSortMode] = useState<LeaderboardSortMode>("xp");
@@ -1655,7 +1652,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     try {
       const saved = localStorage.getItem(friendRequestsStorageKey);
       if (saved) setFriendRequests(JSON.parse(saved) as FriendRequest[]);
-    } catch { /* ignore */ }
+    } catch { }
   }, [authUser, friendRequestsStorageKey]);
 
   useEffect(() => {
@@ -1663,7 +1660,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     try {
       const saved = localStorage.getItem(heartsStorageKey);
       if (saved) setHeartReactions(JSON.parse(saved) as HeartReaction[]);
-    } catch { /* ignore */ }
+    } catch { }
   }, [authUser, heartsStorageKey]);
 
   useEffect(() => {
@@ -1671,7 +1668,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     try {
       const saved = localStorage.getItem(chatStorageKey);
       if (saved) setChatMessages(JSON.parse(saved) as Record<string, ChatMessage[]>);
-    } catch { /* ignore */ }
+    } catch { }
   }, [authUser, chatStorageKey]);
 
   useEffect(() => {
@@ -1679,7 +1676,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     try {
       const saved = localStorage.getItem(chatReadStorageKey);
       if (saved) setChatReadState(JSON.parse(saved) as Record<string, number>);
-    } catch { /* ignore */ }
+    } catch { }
   }, [authUser, chatReadStorageKey]);
 
   useEffect(() => {
@@ -1687,7 +1684,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     try {
       const saved = localStorage.getItem(likesStorageKey);
       if (saved) setLeaderboardLikes(JSON.parse(saved) as Record<string, boolean>);
-    } catch { /* ignore */ }
+    } catch { }
   }, [authUser, likesStorageKey]);
 
   useEffect(() => {
@@ -1712,21 +1709,21 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       setVocabReminderStatus(
         nextSettings.enabled ? "Мэдэгдэл зөвшөөрөгдсөн" : "Мэдэгдэл хаалттай байна"
       );
-    } catch { /* ignore */ }
+    } catch { }
   }, [authUser, vocabReminderStorageKey]);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem(lastActiveStorageKey);
       if (saved) setLastActiveMap(JSON.parse(saved) as Record<string, number>);
-    } catch { /* ignore */ }
+    } catch { }
   }, []);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem(aiExplainedStorageKey);
       if (saved) setAiExplainedWords(normalizeExplainedWords(JSON.parse(saved)));
-    } catch { /* ignore */ }
+    } catch { }
   }, [aiExplainedStorageKey]);
 
 
@@ -1917,7 +1914,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     };
   }, [addWordCategoryMenuOpen, addWordModeMenuOpen, durationMenuOpen]);
 
-  // ── Derived values ────────────────────────────────────────────────────────────
   const filteredWords = useMemo(() => {
     if (selectedCategory === "all") return words;
     return words.filter((w) => w.category_id === selectedCategory);
@@ -2491,7 +2487,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         savedWord,
         ...prev.filter((word) => word.id !== tempId && word.id !== savedWord.id),
       ]);
-      try { formElement.reset(); } catch { /* ignore */ }
+      try { formElement.reset(); } catch { }
       setAddWordCategoryMode("existing");
       setAddWordCategoryId(categoryId);
       setNewWordCategoryName("");
@@ -3237,7 +3233,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         setSharedCode(challenge.invite_code);
         window.setTimeout(() => setSharedCode(""), 2000);
         return;
-      } catch { /* fallback */ }
+      } catch { }
     }
     await navigator.clipboard.writeText(url);
     setSharedCode(challenge.invite_code);
@@ -3630,10 +3626,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         .profile-name { font-size: 24px; font-weight: 900; color: var(--text, #111827); margin: 12px 0 6px; }
         .profile-email { font-size: 13px; color: var(--text-secondary, var(--muted, #6b7280)); font-weight: 800; margin-bottom: 8px; }
         .profile-bio { font-size: 14px; color: var(--text-secondary, var(--muted, #6b7280)); font-weight: 700; line-height: 1.5; margin-bottom: 16px; }
-
-          /* ═══════════════════════════════════════════════════════════════
-    SUPER DUOLINGO PROFILE THEME
-  ═══════════════════════════════════════════════════════════════ */
 
   .super-profile-page {
     display: flex;
@@ -4114,10 +4106,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
   font-weight: 900;
   color: var(--text-secondary, #6b7280);
 }
-/* ═══════════════════════════════════════════════════════════════
-   CLEAN PROFESSIONAL PROFILE
-═══════════════════════════════════════════════════════════════ */
-
 .pro-profile-page {
   display: flex;
   flex-direction: column;
@@ -4897,7 +4885,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     gap: 4px;
   }
 }
-        /* ── LEADERBOARD ── */
         .leader-row { display: flex; align-items: center; gap: 14px; padding: 16px; margin-bottom: 10px; background: var(--bg-secondary, var(--card, #fff)); border: 2px solid var(--border, #e5e7eb); border-radius: 18px; transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease; opacity: 0; transform: translateY(16px); cursor: pointer; }
         .leader-row.animated { animation: leaderRowIn 0.45s cubic-bezier(0.22,1,0.36,1) both; }
         .leader-row:hover { transform: translateY(-2px) scale(1.01); box-shadow: 0 18px 30px rgba(15, 23, 42, 0.08); border-color: rgba(22, 163, 74, 0.24); }
@@ -4932,13 +4919,11 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
         .heart-count { font-size: 10px; font-weight: 900; position: absolute; top: -6px; right: -6px; background: #ef4444; color: #fff; border-radius: 99px; padding: 1px 5px; min-width: 16px; text-align: center; border: 2px solid var(--bg-secondary, #fff); }
         .heart-icon { color: var(--text-secondary, #9ca3af); font-size: 15px; transition: transform 0.2s; }
 
-        /* NEW: Like button */
         .like-btn { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--border, #e5e7eb); background: var(--bg-secondary, #fff); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; transition: transform 0.15s, border-color 0.15s, background 0.15s; position: relative; }
         .like-btn:hover { border-color: #ef4444; background: #fef2f2; transform: scale(1.1); }
         .like-btn.liked { border-color: #ef4444; background: #fef2f2; }
         .like-btn:active { animation: heartPop 0.4s both; }
 
-        /* NEW: Chat button */
         .chat-btn { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--border, #e5e7eb); background: var(--bg-secondary, #fff); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; position: relative; transition: transform 0.15s, border-color 0.15s; }
         .chat-btn:hover { border-color: #3b82f6; transform: scale(1.1); }
         .chat-unread { font-size: 9px; font-weight: 900; position: absolute; top: -5px; right: -5px; background: #3b82f6; color: #fff; border-radius: 99px; padding: 1px 4px; min-width: 15px; text-align: center; border: 2px solid var(--bg-secondary, #fff); }
@@ -5537,7 +5522,6 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
           }
         }
 
-        /* Navigation and responsive shell polish. */
         .app {
           min-height: 100dvh;
           width: 100%;

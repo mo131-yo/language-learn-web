@@ -1,4 +1,3 @@
-// lib/db.ts
 import { neon } from "@neondatabase/serverless";
 
 type NeonQueryFn = ReturnType<typeof neon>;
@@ -9,10 +8,7 @@ let schemaPromise: Promise<void> | null = null;
 const schemaStatements = [
   "CREATE EXTENSION IF NOT EXISTS pgcrypto",
 
-  // ─────────────────────────────────────────────────────────────
-  // USERS
   // Нууц үг plain text биш, зөвхөн password_hash хэлбэрээр хадгална.
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS users (
     id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     name          TEXT        NOT NULL,
@@ -51,9 +47,6 @@ const schemaStatements = [
 
   `CREATE INDEX IF NOT EXISTS users_name_idx ON users(name)`,
 
-  // ─────────────────────────────────────────────────────────────
-  // CATEGORIES
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS categories (
     id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     name       TEXT        NOT NULL UNIQUE,
@@ -64,9 +57,6 @@ const schemaStatements = [
   `ALTER TABLE categories ADD COLUMN IF NOT EXISTS color TEXT NOT NULL DEFAULT '#00e5ff'`,
   `ALTER TABLE categories ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 
-  // ─────────────────────────────────────────────────────────────
-  // WORDS
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS words (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     term        TEXT        NOT NULL,
@@ -102,9 +92,6 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS words_created_idx ON words(created_at DESC)`,
   `CREATE INDEX IF NOT EXISTS words_author_idx ON words(author_id)`,
 
-  // ─────────────────────────────────────────────────────────────
-  // CHALLENGES
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS challenges (
     id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     title          TEXT        NOT NULL,
@@ -142,9 +129,6 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS challenges_host_idx ON challenges(host_id)`,
   `CREATE INDEX IF NOT EXISTS challenges_created_idx ON challenges(created_at DESC)`,
 
-  // ─────────────────────────────────────────────────────────────
-  // CHALLENGE MEMBERS
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS challenge_members (
     id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     challenge_id UUID        NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
@@ -160,9 +144,6 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS challenge_members_challenge_idx ON challenge_members(challenge_id)`,
   `CREATE INDEX IF NOT EXISTS challenge_members_user_idx ON challenge_members(user_id)`,
 
-  // ─────────────────────────────────────────────────────────────
-  // PUSH SUBSCRIPTIONS
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS push_subscriptions (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     member_name TEXT        NOT NULL,
@@ -179,10 +160,7 @@ const schemaStatements = [
 
   `CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id)`,
 
-  // ─────────────────────────────────────────────────────────────
-  // USER WORD MASTERY
   // Хэрэглэгч бүрийн mastery тусдаа хадгалах хүсэлтэй бол ашиглана.
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS user_word_mastery (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -209,10 +187,7 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS user_word_mastery_user_idx ON user_word_mastery(user_id)`,
   `CREATE INDEX IF NOT EXISTS user_word_mastery_word_idx ON user_word_mastery(word_id)`,
 
-  // ─────────────────────────────────────────────────────────────
-  // USER XP LEDGER
   // Үг цээжилснээс гадна 1v1 бооцоот сорилтын XP нэмэх/хасах бүртгэл.
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS user_xp_ledger (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -228,10 +203,7 @@ const schemaStatements = [
    ON user_xp_ledger(user_id, source_type, source_id)
    WHERE source_id IS NOT NULL`,
 
-  // ─────────────────────────────────────────────────────────────
-  // QUIZ ATTEMPTS
   // Шалгалтын оноо, сонгосон төрөл, дундаж хувийн leaderboard-д хэрэглэнэ.
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS quiz_attempts (
     id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -245,10 +217,7 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS quiz_attempts_user_idx ON quiz_attempts(user_id)`,
   `CREATE INDEX IF NOT EXISTS quiz_attempts_category_idx ON quiz_attempts(category_id)`,
 
-  // ─────────────────────────────────────────────────────────────
-  // 1V1 DUELS
   // Найз эсвэл бусад хэрэглэгчтэй XP бооцоотой хурдан үгийн сорилт.
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS duel_challenges (
     id                   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     challenger_id        UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -285,10 +254,7 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS duel_challenges_opponent_idx ON duel_challenges(opponent_id)`,
   `CREATE INDEX IF NOT EXISTS duel_challenges_status_idx ON duel_challenges(status)`,
 
-  // ─────────────────────────────────────────────────────────────
-  // USER APP STATE
   // Browser дээр үлддэг reader/social/theme/XP-spend state-ийг user-аар DB-д хадгална.
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS user_app_state (
     user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     state_key  TEXT        NOT NULL,
@@ -301,11 +267,8 @@ const schemaStatements = [
   `ALTER TABLE user_app_state ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
   `CREATE INDEX IF NOT EXISTS user_app_state_user_idx ON user_app_state(user_id)`,
 
-  // ─────────────────────────────────────────────────────────────
-  // OPTIONAL OLD PROFILES TABLE
   // Хуучин code profileSchema ашиглаж байсан бол эвдрэхгүй байлгахын тулд үлдээв.
   // Гол profile мэдээлэл одоо users table дээр хадгалагдана.
-  // ─────────────────────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS profiles (
     id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     display_name          TEXT        NOT NULL UNIQUE,

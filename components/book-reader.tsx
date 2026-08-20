@@ -821,7 +821,6 @@ export default function BookReader({
         setSavedWords(normalizeReaderVocabulary(JSON.parse(raw)));
       }
     } catch {
-      // ignore
     }
 
     if (!readerAuthUser) {
