@@ -35,6 +35,10 @@ function getJwtSecret() {
   );
 }
 
+export function assertJwtConfigured() {
+  getJwtSecret();
+}
+
 export function signToken(payload: TokenPayload) {
   return jwt.sign(payload, getJwtSecret(), {
     expiresIn: "30d",

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { queryOne } from "@/lib/db";
-import { signToken, COOKIE_NAME, COOKIE_MAX_AGE } from "@/lib/auth-helpers";
+import {
+  signToken,
+  assertJwtConfigured,
+  COOKIE_NAME,
+  COOKIE_MAX_AGE,
+} from "@/lib/auth-helpers";
 
 type UserRow = {
   id: string;
@@ -42,6 +47,11 @@ export async function POST(req: Request) {
       );
     }
 
+    // JWT дутуу тохиргоотой бол хэрэглэгчийг DB-д бичихээс өмнө нь эндээс зогсооно,
+    // ингэснээр signToken() доор throw хийж, аль хэдийн commit хийсэн мөр
+    // хариу авалгүй үлдэх (дараа нь 409-д хүргэдэг) нөхцөл байдал үүсэхгүй.
+    assertJwtConfigured();
+
     const exists = await queryOne<{ id: string }>(
       "SELECT id FROM users WHERE LOWER(email) = LOWER($1)",
       [email]
@@ -56,14 +66,26 @@ export async function POST(req: Request) {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    const user = await queryOne<UserRow>(
-      `
-      INSERT INTO users (name, email, password_hash)
-      VALUES ($1, $2, $3)
-      RETURNING id, name, email, avatar, bio
-      `,
-      [name, email, passwordHash]
-    );
+    let user: UserRow | null;
+
+    try {
+      user = await queryOne<UserRow>(
+        `
+        INSERT INTO users (name, email, password_hash)
+        VALUES ($1, $2, $3)
+        RETURNING id, name, email, avatar, bio
+        `,
+        [name, email, passwordHash]
+      );
+    } catch (err) {
+      if ((err as { code?: string }).code === "23505") {
+        return NextResponse.json(
+          { error: "Энэ email аль хэдийн бүртгэлтэй байна" },
+          { status: 409 }
+        );
+      }
+      throw err;
+    }
 
     if (!user) {
       return NextResponse.json(

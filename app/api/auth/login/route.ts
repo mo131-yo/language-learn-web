@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { queryOne } from "@/lib/db";
-import { signToken, COOKIE_NAME, COOKIE_MAX_AGE } from "@/lib/auth-helpers";
+import {
+  signToken,
+  assertJwtConfigured,
+  COOKIE_NAME,
+  COOKIE_MAX_AGE,
+} from "@/lib/auth-helpers";
 
 type UserRow = {
   id: string;
@@ -27,6 +32,8 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    assertJwtConfigured();
 
     const user = await queryOne<UserRow>(
       `
