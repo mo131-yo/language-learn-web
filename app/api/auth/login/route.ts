@@ -26,9 +26,16 @@ export async function POST(req: Request) {
     const password =
       typeof body.password === "string" ? body.password : "";
 
-    if (!email || !password) {
+    if (!email) {
       return NextResponse.json(
-        { error: "Email эсвэл нууц үг дутуу байна" },
+        { error: "Email оруулна уу", code: "INVALID_EMAIL" },
+        { status: 400 }
+      );
+    }
+
+    if (!password) {
+      return NextResponse.json(
+        { error: "Нууц үг оруулна уу", code: "INVALID_PASSWORD" },
         { status: 400 }
       );
     }

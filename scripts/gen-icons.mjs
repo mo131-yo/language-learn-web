@@ -1,6 +1,3 @@
-// Нэг удаагийн скрипт: public/favicon.svg-ээс PWA-д шаардлагатай PNG icon-уудыг
-// үүсгэнэ (192x192, 512x512, maskable 512x512 safe-zone-той, apple-touch-icon 180x180).
-// Ажиллуулах: node scripts/gen-icons.mjs
 import { readFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,8 +29,6 @@ async function main() {
     .png()
     .toFile(join(outDir, "apple-touch-icon.png"));
 
-  // Maskable: OS-ийн зөөлөн/дугуй mask-аар тайрагдах тул агуулгыг төвийн
-  // "safe zone" (~80% диаметр) дотор багтаан, дэвсгэрийг брэндийн өнгөөр дүүргэнэ.
   const safeSize = Math.round(512 * 0.8);
   const inset = Math.round((512 - safeSize) / 2);
   const scaledIcon = await sharp(svg, { density: 384 })

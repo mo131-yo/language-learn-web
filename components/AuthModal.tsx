@@ -14,12 +14,23 @@ type AuthModalProps = {
   onAuth: (user: AuthUser) => void;
 };
 
-type AuthMode = "login" | "register";
+type AuthMode = "login" | "register" | "forgot";
+
+type FieldErrors = { name?: string; email?: string; password?: string };
+
+const CODE_FIELD_MAP: Record<string, keyof FieldErrors> = {
+  INVALID_NAME: "name",
+  INVALID_EMAIL: "email",
+  WEAK_PASSWORD: "password",
+  EMAIL_TAKEN: "email",
+  INVALID_PASSWORD: "password",
+};
 
 export function AuthModal({ onAuth }: AuthModalProps) {
   const [mode, setMode] = useState<AuthMode>("login");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [showPassword, setShowPassword] = useState(false);
   const [toast, setToast] = useState("");
   const [name, setName] = useState("");
@@ -39,26 +50,44 @@ export function AuthModal({ onAuth }: AuthModalProps) {
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
+    setFieldErrors({});
     setToast("");
     setBusy(true);
     const trimmedName = name.trim();
     const normalizedEmail = email.trim().toLowerCase();
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     try {
-      if (!normalizedEmail) {
-        throw new Error("Email оруулна уу");
+      if (!normalizedEmail || !EMAIL_RE.test(normalizedEmail)) {
+        setFieldErrors({ email: "Зөв email оруулна уу" });
+        return;
+      }
+
+      if (mode === "forgot") {
+        const res = await fetch("/api/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: normalizedEmail }),
+        });
+        await res.json().catch(() => null);
+        setToast("Сэргээх линк илгээгдсэн бол таны имэйлээ шалгана уу.");
+        setMode("login");
+        return;
       }
 
       if (!password) {
-        throw new Error("Нууц үг оруулна уу");
+        setFieldErrors({ password: "Нууц үг оруулна уу" });
+        return;
       }
 
       if (mode === "register" && trimmedName.length < 2) {
-        throw new Error("Нэр дор хаяж 2 тэмдэгт байна");
+        setFieldErrors({ name: "Нэр дор хаяж 2 тэмдэгт байна" });
+        return;
       }
 
       if (mode === "register" && password.length < 8) {
-        throw new Error("Нууц үг дор хаяж 8 тэмдэгт байна");
+        setFieldErrors({ password: "Нууц үг дор хаяж 8 тэмдэгт байна" });
+        return;
       }
 
       const url = mode === "register" ? "/api/auth/register" : "/api/auth/login";
@@ -87,7 +116,13 @@ export function AuthModal({ onAuth }: AuthModalProps) {
           return;
         }
 
-        throw new Error(data?.error ?? "Алдаа гарлаа");
+        const field = data?.code ? CODE_FIELD_MAP[data.code] : undefined;
+        if (field) {
+          setFieldErrors({ [field]: data?.error ?? "Алдаа гарлаа" });
+        } else {
+          setError(data?.error ?? "Алдаа гарлаа");
+        }
+        return;
       }
 
       onAuth({
@@ -107,6 +142,7 @@ export function AuthModal({ onAuth }: AuthModalProps) {
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
     setError("");
+    setFieldErrors({});
     setToast("");
     setShowPassword(false);
   }
@@ -330,6 +366,31 @@ export function AuthModal({ onAuth }: AuthModalProps) {
           line-height: 1.4;
         }
 
+        .auth-field-error {
+          color: #dc2626;
+          font-size: 12px;
+          font-weight: 800;
+          line-height: 1.3;
+        }
+
+        .auth-forgot-link {
+          display: block;
+          text-align: right;
+          border: none;
+          background: none;
+          color: #6b7280;
+          font-weight: 800;
+          cursor: pointer;
+          font-family: inherit;
+          font-size: 12px;
+          margin-top: -6px;
+          padding: 0;
+        }
+
+        .auth-forgot-link:hover {
+          color: #16a34a;
+        }
+
         .auth-toast {
           display: flex;
           align-items: center;
@@ -432,13 +493,15 @@ export function AuthModal({ onAuth }: AuthModalProps) {
           </div>
 
           <div className="auth-title">
-            {mode === "login" ? "Нэвтрэх" : "Бүртгүүлэх"}
+            {mode === "login" ? "Нэвтрэх" : mode === "register" ? "Бүртгүүлэх" : "Нууц үг сэргээх"}
           </div>
 
           <div className="auth-subtitle">
             {mode === "login"
               ? "Email болон нууц үгээ ашиглан үргэлжлүүлнэ үү."
-              : "Шинэ хэрэглэгч үүсгээд үгийн сангаа хадгалаарай."}
+              : mode === "register"
+              ? "Шинэ хэрэглэгч үүсгээд үгийн сангаа хадгалаарай."
+              : "Бүртгэлтэй имэйлээ оруулбал сэргээх линк илгээнэ."}
           </div>
 
           {toast && (
@@ -447,23 +510,25 @@ export function AuthModal({ onAuth }: AuthModalProps) {
             </div>
           )}
 
-          <div className="auth-tabs">
-            <button
-              type="button"
-              className={`auth-tab${mode === "login" ? " active" : ""}`}
-              onClick={() => switchMode("login")}
-            >
-              Нэвтрэх
-            </button>
+          {mode !== "forgot" && (
+            <div className="auth-tabs">
+              <button
+                type="button"
+                className={`auth-tab${mode === "login" ? " active" : ""}`}
+                onClick={() => switchMode("login")}
+              >
+                Нэвтрэх
+              </button>
 
-            <button
-              type="button"
-              className={`auth-tab${mode === "register" ? " active" : ""}`}
-              onClick={() => switchMode("register")}
-            >
-              Бүртгүүлэх
-            </button>
-          </div>
+              <button
+                type="button"
+                className={`auth-tab${mode === "register" ? " active" : ""}`}
+                onClick={() => switchMode("register")}
+              >
+                Бүртгүүлэх
+              </button>
+            </div>
+          )}
 
           <form className="auth-form" onSubmit={handleSubmit}>
             {mode === "register" && (
@@ -479,6 +544,7 @@ export function AuthModal({ onAuth }: AuthModalProps) {
                   minLength={2}
                   required
                 />
+                {fieldErrors.name && <div className="auth-field-error">{fieldErrors.name}</div>}
               </div>
             )}
 
@@ -494,58 +560,76 @@ export function AuthModal({ onAuth }: AuthModalProps) {
                 autoComplete="email"
                 required
               />
+              {fieldErrors.email && <div className="auth-field-error">{fieldErrors.email}</div>}
             </div>
 
-            <div className="auth-field">
-              <label className="auth-label">Нууц үг</label>
+            {mode !== "forgot" && (
+              <div className="auth-field">
+                <label className="auth-label">Нууц үг</label>
 
-              <div className="password-wrap">
-                <input
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  className="auth-input"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={
-                    mode === "register"
-                      ? "Дор хаяж 8 тэмдэгт"
-                      : "Нууц үгээ оруулна уу"
-                  }
-                  autoComplete={
-                    mode === "register" ? "new-password" : "current-password"
-                  }
-                  minLength={mode === "register" ? 8 : 1}
-                  required
-                />
+                <div className="password-wrap">
+                  <input
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    className="auth-input"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={
+                      mode === "register"
+                        ? "Дор хаяж 8 тэмдэгт"
+                        : "Нууцүгээ оруулна уу"
+                    }
+                    autoComplete={
+                      mode === "register" ? "new-password" : "current-password"
+                    }
+                    minLength={mode === "register" ? 8 : 1}
+                    required
+                  />
 
-                <button
-                  type="button"
-                  className="password-icon-button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? "Нууц үг нуух" : "Нууц үг харах"}
-                  title={showPassword ? "Нууц үг нуух" : "Нууц үг харах"}
-                >
-                  {showPassword ? (
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20C7 20 2.73 16.89 1 12c.8-2.27 2.22-4.2 4.06-5.54" />
-                      <path d="M9.9 4.24A10.82 10.82 0 0 1 12 4c5 0 9.27 3.11 11 8a11.5 11.5 0 0 1-2.16 3.43" />
-                      <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
-                      <path d="M1 1l22 22" />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </svg>
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    className="password-icon-button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={showPassword ? "Нууц үг нуух" : "Нууц үг харах"}
+                    title={showPassword ? "Нууц үг нуух" : "Нууц үг харах"}
+                  >
+                    {showPassword ? (
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20C7 20 2.73 16.89 1 12c.8-2.27 2.22-4.2 4.06-5.54" />
+                        <path d="M9.9 4.24A10.82 10.82 0 0 1 12 4c5 0 9.27 3.11 11 8a11.5 11.5 0 0 1-2.16 3.43" />
+                        <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
+                        <path d="M1 1l22 22" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                {fieldErrors.password && <div className="auth-field-error">{fieldErrors.password}</div>}
               </div>
-            </div>
+            )}
+
+            {mode === "login" && (
+              <button
+                type="button"
+                className="auth-forgot-link"
+                onClick={() => switchMode("forgot")}
+              >
+                Нууц үгээ мартсан уу?
+              </button>
+            )}
 
             {error && <div className="auth-error">{error}</div>}
 
             <button type="submit" className="auth-button" disabled={busy}>
-              {busy
+              {mode === "forgot"
+                ? busy
+                  ? "Илгээж байна..."
+                  : "Сэргээх линк илгээх"
+                : busy
                 ? mode === "login"
                   ? "Нэвтэрч байна..."
                   : "Бүртгэж байна..."
@@ -567,7 +651,7 @@ export function AuthModal({ onAuth }: AuthModalProps) {
                   Шинээр бүртгүүлэх
                 </button>
               </>
-            ) : (
+            ) : mode === "register" ? (
               <>
                 Аль хэдийн бүртгэлтэй юу?{" "}
                 <button
@@ -578,6 +662,14 @@ export function AuthModal({ onAuth }: AuthModalProps) {
                   Нэвтрэх
                 </button>
               </>
+            ) : (
+              <button
+                type="button"
+                className="auth-switch"
+                onClick={() => switchMode("login")}
+              >
+                ← Нэвтрэх рүү буцах
+              </button>
             )}
           </div>
         </div>

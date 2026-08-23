@@ -3,8 +3,11 @@ node_modules
 out
 dist
 *.tsbuildinfo
-.env*.local
+
 .env
+.env.*
+.env.local
+.env.example
 
 # next-pwa build output (content-hashed, regenerated on every build)
 public/sw.js

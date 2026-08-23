@@ -1,7 +1,3 @@
-// Push notification логик — next-pwa-ийн автоматаар үүсгэсэн Workbox service
-// worker-т importScripts-аар холбогдоно (тохиргоо: next.config.ts, customWorkerSrc).
-// Offline caching (precache/runtime cache)-ийг Workbox өөрөө барина; энэ файл нь
-// зөвхөн push/notificationclick-ийг барих зориулалттай.
 
 self.addEventListener("push", (event) => {
   const data = event.data ? event.data.json() : {};

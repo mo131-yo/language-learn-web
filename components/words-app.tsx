@@ -1281,11 +1281,11 @@ function ChatDrawer({
 
 
 export function WordsApp({ initialData }: { initialData: HomeData }) {
-  const [categories, setCategories] = useState(initialData.categories);
-  const [words, setWords] = useState(initialData.words);
-  const [challenges, setChallenges] = useState(initialData.challenges);
+  const [categories, setCategories] = useState(initialData.categories ?? []);
+  const [words, setWords] = useState(initialData.words ?? []);
+  const [challenges, setChallenges] = useState(initialData.challenges ?? []);
   const [duels, setDuels] = useState(initialData.duels ?? []);
-  const [leaderboard, setLeaderboard] = useState(initialData.leaderboard);
+  const [leaderboard, setLeaderboard] = useState(initialData.leaderboard ?? []);
 
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [vocabSearch, setVocabSearch] = useState("");
@@ -2880,6 +2880,7 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
     const code = String(form.get("code") ?? "").trim();
     const displayName =
       String(form.get("displayName") ?? "").trim() || authUser?.name || "Anonymous";
+    setBusy("join");
     try {
       await postJson(`/api/challenges/${code}/join`, { displayName });
       setMemberName(displayName);
@@ -2887,6 +2888,8 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
       refreshAfterMutation();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "Алдаа гарлаа");
+    } finally {
+      setBusy("");
     }
   }
 
@@ -7293,8 +7296,8 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                 <>
                   <div className="sec-head"><div className="sec-title">1v1 урилга ба тоглолт</div></div>
                   {activeDuels.map((duel) => {
-                    const isOpponent = duel.opponent_id === authUser.id;
-                    const isChallenger = duel.challenger_id === authUser.id;
+                    const isOpponent = duel.opponent_id === authUser?.id;
+                    const isChallenger = duel.challenger_id === authUser?.id;
                     const mySubmitted = isChallenger ? duel.challenger_answers : duel.opponent_answers;
                     const opponentName = isChallenger ? duel.opponent_name : duel.challenger_name;
                     return (
@@ -7503,9 +7506,11 @@ export function WordsApp({ initialData }: { initialData: HomeData }) {
                   <input name="code" className="form-input" placeholder="Invite code" required />
                 </div>
                 <div className="form-group">
-                  <input name="displayName" className="form-input" placeholder={authUser.name} defaultValue={authUser.name} onChange={(e) => setMemberName(e.target.value)} />
+                  <input name="displayName" className="form-input" placeholder={authUser?.name} defaultValue={authUser?.name} onChange={(e) => setMemberName(e.target.value)} />
                 </div>
-                <button type="submit" className="primary-btn" style={{ width: "100%", marginBottom: 10 }}>Нэгдэх</button>
+                <button type="submit" className="primary-btn" style={{ width: "100%", marginBottom: 10 }} disabled={busy === "join"}>
+                  {busy === "join" ? "Нэгдэж байна..." : "Нэгдэх"}
+                </button>
                 <button type="button" className="secondary-btn" style={{ width: "100%" }} onClick={subscribeToPush}>🔔 Notification асаах</button>
               </form>
             </div>

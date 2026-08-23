@@ -530,6 +530,13 @@ export default function BookReader({
   const [highlightedWord, setHighlightedWord] = useState("");
   const [fromCache, setFromCache] = useState(false);
   const [popup, setPopup] = useState({ visible: false });
+  const [selectionPopup, setSelectionPopup] = useState({
+    visible: false,
+    text: "",
+    translation: "",
+    loading: false,
+    error: "",
+  });
   const [preferences, setPreferences] = useState<ReaderPreferences>(
     DEFAULT_READER_PREFERENCES
   );
@@ -576,6 +583,44 @@ export default function BookReader({
     setWordData(null);
     setApiError("");
     setLoading(false);
+  }
+
+  function closeSelectionPopup() {
+    setSelectionPopup({ visible: false, text: "", translation: "", loading: false, error: "" });
+  }
+
+  async function translateSelection(text: string) {
+    setSelectionPopup({ visible: true, text, translation: "", loading: true, error: "" });
+
+    try {
+      const res = await fetch("/api/translate-selection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.error ?? "Орчуулга авч чадсангүй");
+      }
+
+      setSelectionPopup({
+        visible: true,
+        text,
+        translation: data.translation ?? "",
+        loading: false,
+        error: "",
+      });
+    } catch (error) {
+      setSelectionPopup({
+        visible: true,
+        text,
+        translation: "",
+        loading: false,
+        error: getErrorMessage(error),
+      });
+    }
   }
 
   function splitImportedTextIntoOneChapter(text: string) {
@@ -882,6 +927,23 @@ export default function BookReader({
       void saveUserState("reader-vocab", savedWords);
     }
   }, [readerStateLoaded, savedWords]);
+
+  useEffect(() => {
+    function handleSelectionMouseUp(event: MouseEvent) {
+      const body = bodyRef.current;
+      if (!body || !body.contains(event.target as Node)) return;
+
+      const selection = window.getSelection();
+      const text = selection?.toString().trim() ?? "";
+
+      if (text.length > 1 && text.split(/\s+/).length > 1) {
+        void translateSelection(text);
+      }
+    }
+
+    document.addEventListener("mouseup", handleSelectionMouseUp);
+    return () => document.removeEventListener("mouseup", handleSelectionMouseUp);
+  }, []);
 
   useEffect(() => {
     try {
@@ -4026,6 +4088,39 @@ export default function BookReader({
             </div>
           </div>
         </>
+      )}
+
+      {selectionPopup.visible && (
+        <div
+          className={`popup popup-theme-${preferences.theme}`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Орчуулга"
+        >
+          <button
+            className="close-btn"
+            onClick={closeSelectionPopup}
+            aria-label="Орчуулга хаах"
+          >
+            ×
+          </button>
+
+          <div className="popup-topline">Орчуулга</div>
+          <p className="popup-word">{selectionPopup.text}</p>
+
+          {selectionPopup.loading ? (
+            <div className="ai-loading">
+              <div className="ai-loading-head">
+                <span className="ai-skeleton-line mid" />
+                <span className="ai-skeleton-line" />
+              </div>
+            </div>
+          ) : selectionPopup.error ? (
+            <p className="ai-error-title">{selectionPopup.error}</p>
+          ) : (
+            <p>{selectionPopup.translation}</p>
+          )}
+        </div>
       )}
 
       {toast && <div className="br-toast">{toast}</div>}

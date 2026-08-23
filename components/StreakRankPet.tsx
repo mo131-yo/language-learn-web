@@ -271,7 +271,6 @@ export function StreakRankPetCard({
   spendableXp?: number;
   streak: number;
   longestStreak?: number;
-  /** Pass true to show the Duolingo-style broken-heart overlay */
   streakLost?: boolean;
   onRecover?: () => void;
   onClick?: () => void;

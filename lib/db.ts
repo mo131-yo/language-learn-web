@@ -8,7 +8,6 @@ let schemaPromise: Promise<void> | null = null;
 const schemaStatements = [
   "CREATE EXTENSION IF NOT EXISTS pgcrypto",
 
-  // Нууц үг plain text биш, зөвхөн password_hash хэлбэрээр хадгална.
   `CREATE TABLE IF NOT EXISTS users (
     id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     name          TEXT        NOT NULL,
@@ -28,7 +27,6 @@ const schemaStatements = [
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 
-  // Хуучин schema дээр name UNIQUE байсан бол email register ашиглахад саад болох тул устгана
   `DO $$
   BEGIN
     IF EXISTS (
@@ -40,7 +38,6 @@ const schemaStatements = [
     END IF;
   END $$`,
 
-  // Хуучин nullable/empty email-тэй record байж болох тул partial unique index ашиглана
   `CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_unique_idx
    ON users (LOWER(email))
    WHERE email IS NOT NULL`,
@@ -120,7 +117,6 @@ const schemaStatements = [
    SET expires_at = created_at + make_interval(days => duration_days)
    WHERE expires_at IS NULL`,
 
-  // invite_code null байж болох хуучин мөрүүдээс болоод unique constraint унахгүй байхаар partial unique index
   `CREATE UNIQUE INDEX IF NOT EXISTS challenges_invite_code_unique_idx
    ON challenges(invite_code)
    WHERE invite_code IS NOT NULL`,
@@ -160,7 +156,6 @@ const schemaStatements = [
 
   `CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id)`,
 
-  // Хэрэглэгч бүрийн mastery тусдаа хадгалах хүсэлтэй бол ашиглана.
   `CREATE TABLE IF NOT EXISTS user_word_mastery (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -187,7 +182,6 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS user_word_mastery_user_idx ON user_word_mastery(user_id)`,
   `CREATE INDEX IF NOT EXISTS user_word_mastery_word_idx ON user_word_mastery(word_id)`,
 
-  // Үг цээжилснээс гадна 1v1 бооцоот сорилтын XP нэмэх/хасах бүртгэл.
   `CREATE TABLE IF NOT EXISTS user_xp_ledger (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -203,7 +197,6 @@ const schemaStatements = [
    ON user_xp_ledger(user_id, source_type, source_id)
    WHERE source_id IS NOT NULL`,
 
-  // Шалгалтын оноо, сонгосон төрөл, дундаж хувийн leaderboard-д хэрэглэнэ.
   `CREATE TABLE IF NOT EXISTS quiz_attempts (
     id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -217,7 +210,6 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS quiz_attempts_user_idx ON quiz_attempts(user_id)`,
   `CREATE INDEX IF NOT EXISTS quiz_attempts_category_idx ON quiz_attempts(category_id)`,
 
-  // Найз эсвэл бусад хэрэглэгчтэй XP бооцоотой хурдан үгийн сорилт.
   `CREATE TABLE IF NOT EXISTS duel_challenges (
     id                   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     challenger_id        UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -254,7 +246,6 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS duel_challenges_opponent_idx ON duel_challenges(opponent_id)`,
   `CREATE INDEX IF NOT EXISTS duel_challenges_status_idx ON duel_challenges(status)`,
 
-  // Browser дээр үлддэг reader/social/theme/XP-spend state-ийг user-аар DB-д хадгална.
   `CREATE TABLE IF NOT EXISTS user_app_state (
     user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     state_key  TEXT        NOT NULL,
@@ -267,8 +258,6 @@ const schemaStatements = [
   `ALTER TABLE user_app_state ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
   `CREATE INDEX IF NOT EXISTS user_app_state_user_idx ON user_app_state(user_id)`,
 
-  // Хуучин code profileSchema ашиглаж байсан бол эвдрэхгүй байлгахын тулд үлдээв.
-  // Гол profile мэдээлэл одоо users table дээр хадгалагдана.
   `CREATE TABLE IF NOT EXISTS profiles (
     id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     display_name          TEXT        NOT NULL UNIQUE,
@@ -290,6 +279,17 @@ const schemaStatements = [
       ADD CONSTRAINT profiles_daily_goal_check CHECK (daily_goal BETWEEN 1 AND 200);
     END IF;
   END $$`,
+
+  `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash  TEXT        NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used_at     TIMESTAMPTZ,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`,
+
+  `CREATE INDEX IF NOT EXISTS password_reset_tokens_user_idx ON password_reset_tokens(user_id)`,
 ];
 
 export function getPool() {

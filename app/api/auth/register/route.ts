@@ -28,28 +28,26 @@ export async function POST(req: Request) {
 
     if (name.length < 2) {
       return NextResponse.json(
-        { error: "Нэр дор хаяж 2 тэмдэгт байна" },
+        { error: "Нэр дор хаяж 2 тэмдэгт байна", code: "INVALID_NAME" },
         { status: 400 }
       );
     }
 
-    if (!email || !email.includes("@")) {
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email || !EMAIL_RE.test(email)) {
       return NextResponse.json(
-        { error: "Зөв email оруулна уу" },
+        { error: "Зөв email оруулна уу", code: "INVALID_EMAIL" },
         { status: 400 }
       );
     }
 
     if (password.length < 8) {
       return NextResponse.json(
-        { error: "Нууц үг дор хаяж 8 тэмдэгт байна" },
+        { error: "Нууц үг дор хаяж 8 тэмдэгт байна", code: "WEAK_PASSWORD" },
         { status: 400 }
       );
     }
 
-    // JWT дутуу тохиргоотой бол хэрэглэгчийг DB-д бичихээс өмнө нь эндээс зогсооно,
-    // ингэснээр signToken() доор throw хийж, аль хэдийн commit хийсэн мөр
-    // хариу авалгүй үлдэх (дараа нь 409-д хүргэдэг) нөхцөл байдал үүсэхгүй.
     assertJwtConfigured();
 
     const exists = await queryOne<{ id: string }>(
@@ -59,7 +57,7 @@ export async function POST(req: Request) {
 
     if (exists) {
       return NextResponse.json(
-        { error: "Энэ email аль хэдийн бүртгэлтэй байна" },
+        { error: "Энэ email аль хэдийн бүртгэлтэй байна", code: "EMAIL_TAKEN" },
         { status: 409 }
       );
     }
@@ -80,7 +78,7 @@ export async function POST(req: Request) {
     } catch (err) {
       if ((err as { code?: string }).code === "23505") {
         return NextResponse.json(
-          { error: "Энэ email аль хэдийн бүртгэлтэй байна" },
+          { error: "Энэ email аль хэдийн бүртгэлтэй байна", code: "EMAIL_TAKEN" },
           { status: 409 }
         );
       }

@@ -15,8 +15,6 @@ class MissingOpenAIKeyError extends Error {
 
 let openaiClient: OpenAI | null = null;
 
-// Constructed lazily: the OpenAI constructor throws when no key resolves, and
-// Next.js imports this module at build time to collect page data.
 function getOpenAIClient(): OpenAI {
   const apiKey = process.env.OPENAI_KEY ?? process.env.OPENAI_API_KEY;
   if (!apiKey) throw new MissingOpenAIKeyError();
